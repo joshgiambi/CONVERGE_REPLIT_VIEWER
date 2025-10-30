@@ -1,5 +1,47 @@
 import polygonClipping from 'polygon-clipping';
 
+const DUPLICATE_EPSILON = 1e-3;
+const AREA_EPSILON = 1e-4;
+
+const polygonArea = (polygon: [number, number][]): number => {
+  if (polygon.length < 3) return 0;
+  let area = 0;
+  for (let i = 0; i < polygon.length - 1; i += 1) {
+    const [x1, y1] = polygon[i];
+    const [x2, y2] = polygon[i + 1];
+    area += x1 * y2 - x2 * y1;
+  }
+  return area / 2;
+};
+
+const pointsAlmostEqual = (a: [number, number], b: [number, number]): boolean => {
+  return Math.abs(a[0] - b[0]) <= DUPLICATE_EPSILON && Math.abs(a[1] - b[1]) <= DUPLICATE_EPSILON;
+};
+
+const sanitizePolygon = (polygon: [number, number][]): [number, number][] => {
+  if (!polygon.length) return [];
+
+  const sanitized: [number, number][] = [];
+  let lastPoint: [number, number] | null = null;
+  for (const point of polygon) {
+    if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) continue;
+    if (lastPoint && pointsAlmostEqual(lastPoint, point)) continue;
+    sanitized.push([point[0], point[1]]);
+    lastPoint = point;
+  }
+  if (sanitized.length < 3) return [];
+
+  const first = sanitized[0];
+  const last = sanitized[sanitized.length - 1];
+  if (!pointsAlmostEqual(first, last)) {
+    sanitized.push([first[0], first[1]]);
+  }
+
+  if (sanitized.length < 4) return [];
+  if (Math.abs(polygonArea(sanitized)) <= AREA_EPSILON) return [];
+  return sanitized;
+};
+
 /**
  * Simple polygon operations using the polygon-clipping library
  * Much more reliable than js-angusj-clipper for basic operations
@@ -9,21 +51,21 @@ import polygonClipping from 'polygon-clipping';
  * Convert 3D contour points (x,y,z format) to 2D polygon format for polygon-clipping
  */
 export function contourToPolygon(points: number[]): [number, number][] {
+  if (!Array.isArray(points) || points.length < 6) return [];
+
   const polygon: [number, number][] = [];
+  let lastPoint: [number, number] | null = null;
   for (let i = 0; i < points.length; i += 3) {
-    polygon.push([points[i], points[i + 1]]);
+    const x = Number(points[i]);
+    const y = Number(points[i + 1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    const current: [number, number] = [x, y];
+    if (lastPoint && pointsAlmostEqual(lastPoint, current)) continue;
+    polygon.push(current);
+    lastPoint = current;
   }
-  
-  // Ensure polygon is closed
-  if (polygon.length > 0) {
-    const first = polygon[0];
-    const last = polygon[polygon.length - 1];
-    if (first[0] !== last[0] || first[1] !== last[1]) {
-      polygon.push([first[0], first[1]]);
-    }
-  }
-  
-  return polygon;
+
+  return sanitizePolygon(polygon);
 }
 
 /**
@@ -31,7 +73,15 @@ export function contourToPolygon(points: number[]): [number, number][] {
  */
 export function polygonToContour(polygon: [number, number][], z: number = 0): number[] {
   const contour: number[] = [];
-  for (const point of polygon) {
+  if (!Array.isArray(polygon) || polygon.length === 0) return contour;
+
+  const sanitized = sanitizePolygon(polygon);
+  if (!sanitized.length) return contour;
+
+  // Drop the closing point to avoid duplicating in contour representation
+  const limit = sanitized.length - 1;
+  for (let i = 0; i < limit; i += 1) {
+    const point = sanitized[i];
     contour.push(point[0], point[1], z);
   }
   return contour;
@@ -54,6 +104,15 @@ export function subtractContourSimple(
     // Convert to polygon format
     const originalPolygon = contourToPolygon(originalContour);
     const deletePolygon = contourToPolygon(deleteContour);
+
+    if (!originalPolygon.length) {
+      console.warn('🔹 ⚠️ Original contour invalid for subtraction');
+      return [originalContour];
+    }
+    if (!deletePolygon.length) {
+      console.warn('🔹 ⚠️ Delete contour invalid, returning original');
+      return [originalContour];
+    }
     
     console.log('🔹 Converted polygons - Original:', originalPolygon.length, 'Delete:', deletePolygon.length);
     
@@ -98,6 +157,11 @@ export function unionContoursSimple(
     
     const polygon1 = contourToPolygon(contour1);
     const polygon2 = contourToPolygon(contour2);
+
+    if (!polygon1.length || !polygon2.length) {
+      console.warn('🔹 ⚠️ Union received invalid polygon geometry');
+      return [contour1, contour2];
+    }
     
     const result = polygonClipping.union(
       [polygon1],
@@ -135,14 +199,29 @@ export function unionMultipleContoursSimple(contours: number[][]): number[][] {
     type Ring = [number, number][];
     type Polygon = Ring[];
     type MultiPolygon = Polygon[];
-    
-    const toPolygon = (c: number[]): Polygon => [contourToPolygon(c)];
-    const toMultiPolygon = (c: number[]): MultiPolygon => [toPolygon(c)];
+
+    const toPolygon = (c: number[]): Polygon => {
+      const ring = contourToPolygon(c);
+      return ring.length ? [ring] : [];
+    };
+    const toMultiPolygon = (c: number[]): MultiPolygon => {
+      const polygon = toPolygon(c);
+      return polygon.length ? [polygon] : [];
+    };
 
     const z = contours[0][2] || 0;
+    if (!toPolygon(contours[0]).length) {
+      console.warn('🔹 ⚠️ First contour invalid, aborting union');
+      return contours;
+    }
+
     let accum: MultiPolygon = toMultiPolygon(contours[0]);
     for (let i = 1; i < contours.length; i++) {
       const nextMp: MultiPolygon = toMultiPolygon(contours[i]);
+      if (!nextMp.length) {
+        console.warn(`🔹 ⚠️ Skipping invalid contour during union at index ${i}`);
+        continue;
+      }
       accum = polygonClipping.union(accum as any, nextMp as any) as MultiPolygon;
     }
 
@@ -197,6 +276,10 @@ export function doPolygonsIntersectSimple(polygon1: number[], polygon2: number[]
     // If bounding boxes overlap, try actual intersection
     const poly1 = contourToPolygon(polygon1);
     const poly2 = contourToPolygon(polygon2);
+
+    if (!poly1.length || !poly2.length) {
+      return false;
+    }
     
     const intersection = polygonClipping.intersection([poly1], [poly2]);
     

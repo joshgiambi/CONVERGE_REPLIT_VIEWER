@@ -45,7 +45,13 @@ export const WINDOW_LEVEL_PRESETS: Record<string, WindowLevel> = {
   'liver': { window: 150, level: 30 },
   'mediastinum': { window: 350, level: 50 },
   'abdomen': { window: 350, level: 40 },
-  'full range': { window: 4096, level: 1024 }
+  'full range': { window: 4096, level: 1024 },
+  // MRI presets
+  'mri brain t1': { window: 600, level: 300 },
+  'mri brain t2': { window: 2000, level: 1000 },
+  'mri brain flair': { window: 1800, level: 900 },
+  'mri spine': { window: 1200, level: 600 },
+  'mri auto': { window: 2000, level: 1000 }, // Good default for most MRI
 };
 
 export function isDICOMFile(file: File): boolean {

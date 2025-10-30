@@ -192,10 +192,16 @@ const maybeAttachHelperOutput = async (
   const helper = process.env.DICOM_REG_CONVERTER;
   if (!helper) {
     fuseboxHelperMetrics.disabled += 1;
-    throw createFuseboxError('FUSEBOX_HELPER_MISSING', 'Fusebox helper is not configured (DICOM_REG_CONVERTER unset)', {
+    logHelper(emit, 'warn', 'Fusebox helper not configured; using matrix transform', {
       primarySeriesId,
       secondarySeriesId,
+      regFile: regPath,
+      candidateId,
     });
+    return {
+      ...info,
+      transformSource: info.transformSource ?? 'matrix-fallback',
+    };
   }
   if (!primaryFoR || !secondaryFoR) {
     throw createFuseboxError('FUSEBOX_MISSING_FOR', 'Frame of Reference UID missing for helper conversion', {

@@ -55,3 +55,9 @@ coverage/
 # Temporary files
 tmp/
 temp/scripts/__pycache__/
+
+# AI service caches
+server/segvol/weights/
+server/mem3d/weights/
+server/monai/weights/
+server/monai/.matplotlib-cache/

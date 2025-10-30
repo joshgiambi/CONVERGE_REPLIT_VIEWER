@@ -1169,13 +1169,25 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
 
   // Handle applying 3D mask from AI segmentation
   const handleApply3DMask = async (payload: any) => {
+    console.log('🧠🧠🧠 handleApply3DMask CALLED!', {
+      hasPayload: !!payload,
+      structureId: payload?.structureId,
+      hasMask: !!payload?.mask,
+      maskDepth: payload?.mask?.length,
+      confidence: payload?.confidence
+    });
+
     if (!rtStructures) {
       log.error('RT structures not available for 3D mask application', 'viewer');
+      console.error('❌ No rtStructures');
       return;
     }
 
-    const { structureId, mask, confidence } = payload;
-    log.info(`🧠 Applying 3D mask to structure ${structureId} (confidence: ${confidence})`, 'viewer');
+    const { structureId, mask, confidence, sourceImages, isFusionMode } = payload;
+    log.info(`🧠 Applying 3D mask to structure ${structureId} (confidence: ${confidence}, fusion: ${isFusionMode})`, 'viewer');
+    console.log('📊 RT structures:', rtStructures.structures?.map((s: any) => ({ id: s.roiNumber, name: s.structureName })));
+    console.log('📊 Source images:', sourceImages?.length, 'images, isFusionMode:', isFusionMode);
+    console.log('📊 Target images (primary):', images.length, 'images');
 
     // Create a deep copy of RT structures
     const updatedRTStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
@@ -1185,8 +1197,11 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       (s: any) => s.roiNumber === structureId,
     );
 
+    console.log('🔍 Structure found:', structure?.structureName);
+
     if (!structure) {
       log.error(`Structure ${structureId} not found for 3D mask application`, 'viewer');
+      console.error('❌ Structure not found!');
       return;
     }
 
@@ -1194,11 +1209,31 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       // mask is in format [D][H][W] where D is depth (number of slices)
       const depth = mask.length;
       log.info(`Processing 3D mask with ${depth} slices`, 'viewer');
+      console.log('📏 Mask shape:', { depth, height: mask[0]?.length, width: mask[0]?.[0]?.length });
+
+      // Validate source images
+      if (!sourceImages || sourceImages.length === 0) {
+        console.error('❌ No source images provided!');
+        log.error('No source images for 3D mask', 'viewer');
+        return;
+      }
+
+      if (sourceImages.length !== depth) {
+        console.error(`❌ Source images count (${sourceImages.length}) doesn't match mask depth (${depth})`);
+        log.error(`Source images mismatch: ${sourceImages.length} vs ${depth}`, 'viewer');
+        return;
+      }
+
+      console.log('✅ Source images validated:', sourceImages.length, 'images');
 
       // Import contour tracing library
       const { maskToContours } = await import('@/lib/mask-to-contours');
 
       let contoursAdded = 0;
+      let slicesProcessed = 0;
+      let slicesWithPixels = 0;
+      let slicesSkippedNoMetadata = 0;
+
       for (let sliceIdx = 0; sliceIdx < depth; sliceIdx++) {
         const sliceMask = mask[sliceIdx];
 
@@ -1206,34 +1241,129 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const hasPixels = sliceMask.some((row: number[]) => row.some((val: number) => val > 0));
         if (!hasPixels) continue;
 
-        // Get the slice position - assume slices are in order matching images array
-        if (sliceIdx >= images.length) {
-          log.warn(`Slice index ${sliceIdx} exceeds images array length ${images.length}`, 'viewer');
+        slicesWithPixels++;
+        console.log(`✓ Mask slice ${sliceIdx} has pixels`);
+
+        // Get the source image this mask slice corresponds to
+        if (!sourceImages || sliceIdx >= sourceImages.length) {
+          log.warn(`Slice index ${sliceIdx} exceeds source images length ${sourceImages?.length}`, 'viewer');
+          console.warn(`⚠️ Slice ${sliceIdx} exceeds source images array`);
           continue;
         }
 
-        const image = images[sliceIdx];
-        const slicePosition = image.parsedSliceLocation || image.parsedZPosition || sliceIdx;
+        const sourceImage = sourceImages[sliceIdx];
+
+        // Extract Z position from ImagePositionPatient if parsedSliceLocation not available
+        let slicePosition = sourceImage.parsedSliceLocation || sourceImage.parsedZPosition;
+
+        if (slicePosition == null) {
+          // Try to get Z from ImagePositionPatient[2]
+          const ipp = toNumericArray(sourceImage.imagePosition, 3)
+            || toNumericArray(sourceImage.imagePositionPatient, 3)
+            || toNumericArray(sourceImage.metadata?.imagePositionPatient, 3);
+
+          if (ipp && ipp.length >= 3) {
+            slicePosition = ipp[2];
+            console.log(`📍 Extracted Z=${slicePosition} from ImagePositionPatient[2] for slice ${sliceIdx}`);
+          } else {
+            console.error(`❌ No valid Z position found for slice ${sliceIdx}! Using index as fallback (will cause misalignment)`);
+            slicePosition = sliceIdx;
+          }
+        }
+
+        console.log(`📍 Mask slice ${sliceIdx} -> world Z position: ${slicePosition}`);
+
+        // Find the corresponding target image in the primary series with matching Z position
+        const targetImage = images.find(img => {
+          let targetZ = img.parsedSliceLocation || img.parsedZPosition;
+
+          // If no parsed Z, try to extract from ImagePositionPatient
+          if (targetZ == null) {
+            const targetIpp = toNumericArray(img.imagePosition, 3)
+              || toNumericArray(img.imagePositionPatient, 3)
+              || toNumericArray(img.metadata?.imagePositionPatient, 3);
+            if (targetIpp && targetIpp.length >= 3) {
+              targetZ = targetIpp[2];
+            }
+          }
+
+          if (targetZ == null) return false;
+
+          return Math.abs(targetZ - slicePosition) < SLICE_TOL_MM;
+        });
+
+        if (!targetImage) {
+          log.warn(`No target image found for Z position ${slicePosition}`, 'viewer');
+          console.warn(`⚠️ No target slice found for Z=${slicePosition}`);
+
+          // Log available target Z positions to help debug
+          const targetZs = images.map(img => {
+            return img.parsedSliceLocation || img.parsedZPosition ||
+              toNumericArray(img.imagePosition, 3)?.[2] ||
+              toNumericArray(img.imagePositionPatient, 3)?.[2] || '?';
+          });
+          console.log(`   Available target Z positions: [${targetZs.slice(0, 5).join(', ')}...${targetZs.slice(-2).join(', ')}]`);
+          continue;
+        }
+
+        const targetZ = targetImage.parsedSliceLocation || targetImage.parsedZPosition ||
+          toNumericArray(targetImage.imagePosition, 3)?.[2] ||
+          toNumericArray(targetImage.imagePositionPatient, 3)?.[2];
+        console.log(`✓ Mapped to target image at Z=${targetZ} (diff: ${Math.abs(targetZ - slicePosition).toFixed(2)}mm)`);
+
+        // CRITICAL: Use target CT Z position for storing contours, not source MRI Z!
+        // This ensures contours can be found when rendering CT slices
+        const contourSlicePosition = targetZ;
+
+        slicesProcessed++;
 
         // Get image metadata for coordinate conversion
-        const imgMetadata = image.imageMetadata || (sliceIdx === currentIndex ? imageMetadata : null);
-        if (!imgMetadata) {
-          log.warn(`No metadata for slice ${sliceIdx}, skipping`, 'viewer');
-          continue;
-        }
+        // In non-fusion mode, source and target are the same series
+        // The mask pixels correspond to this image's geometry
+        const imgMetadata = isFusionMode
+          ? (sourceImage.imageMetadata || sourceImage.metadata || sourceImage)
+          : (targetImage.imageMetadata || targetImage.metadata || targetImage);
 
-        // Parse image geometry
+        // Parse image geometry - use the image at this slice position
         const imagePosition = toNumericArray(imgMetadata.imagePosition, 3)
           || toNumericArray(imgMetadata.imagePositionPatient, 3)
-          || [0, 0, slicePosition];
+          || toNumericArray(targetImage.imagePosition, 3)
+          || toNumericArray(targetImage.imagePositionPatient, 3)
+          || toNumericArray(sourceImage.imagePosition, 3)
+          || toNumericArray(sourceImage.imagePositionPatient, 3)
+          || [0, 0, contourSlicePosition];
 
-        const pixelSpacingArray = toNumericArray(imgMetadata.pixelSpacing, 2) || [1, 1];
+        const pixelSpacingArray = toNumericArray(imgMetadata.pixelSpacing, 2)
+          || toNumericArray(targetImage.pixelSpacing, 2)
+          || toNumericArray(sourceImage.pixelSpacing, 2)
+          || [1, 1];
         const rowSpacing = pixelSpacingArray[0];
         const columnSpacing = pixelSpacingArray[1];
 
         const orientationArray = toNumericArray(imgMetadata.imageOrientation, 6)
           || toNumericArray(imgMetadata.imageOrientationPatient, 6)
+          || toNumericArray(targetImage.imageOrientation, 6)
+          || toNumericArray(targetImage.imageOrientationPatient, 6)
+          || toNumericArray(sourceImage.imageOrientation, 6)
+          || toNumericArray(sourceImage.imageOrientationPatient, 6)
           || [1, 0, 0, 0, 1, 0];
+
+        console.log(`📐 Using metadata: position=[${imagePosition.join(', ')}], spacing=[${pixelSpacingArray.join(', ')}], orientation=[${orientationArray.slice(0, 3).join(', ')}]`);
+
+        // Validate metadata values
+        const hasInvalidValues =
+          imagePosition.some(v => !Number.isFinite(v)) ||
+          pixelSpacingArray.some(v => !Number.isFinite(v) || v <= 0) ||
+          orientationArray.some(v => !Number.isFinite(v));
+
+        if (hasInvalidValues) {
+          console.error(`❌ Invalid metadata values detected for slice ${sliceIdx}!`);
+          console.error(`   ImagePosition: [${imagePosition.join(', ')}]`);
+          console.error(`   PixelSpacing: [${pixelSpacingArray.join(', ')}]`);
+          console.error(`   Orientation: [${orientationArray.join(', ')}]`);
+          slicesSkippedNoMetadata++;
+          continue;
+        }
 
         const rowDir = [orientationArray[0], orientationArray[1], orientationArray[2]];
         const colDir = [orientationArray[3], orientationArray[4], orientationArray[5]];
@@ -1241,43 +1371,102 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         // Convert mask to contours (returns pixel coordinates)
         const contourPointsPixel = await maskToContours(sliceMask);
 
-        if (contourPointsPixel.length === 0) continue;
+        console.log(`🎨 maskToContours returned ${contourPointsPixel.length} contours`);
+        if (contourPointsPixel.length === 0) {
+          console.warn(`⚠️ No contours found for slice ${sliceIdx}`);
+          continue;
+        }
 
-        // Remove existing contour on this slice
+        // Remove existing contour on this slice (using target CT Z position)
+        const beforeRemove = structure.contours.length;
         structure.contours = structure.contours.filter(
-          (c: any) => Math.abs(c.slicePosition - slicePosition) > SLICE_TOL_MM
+          (c: any) => Math.abs(c.slicePosition - contourSlicePosition) > SLICE_TOL_MM
         );
+        console.log(`🗑️ Removed ${beforeRemove - structure.contours.length} existing contours at target Z=${contourSlicePosition}`);
 
         // Add new contours for this slice
         for (const pixelPoints of contourPointsPixel) {
-          if (pixelPoints.length < 9) continue;
+          console.log(`  Processing contour with ${pixelPoints.length} pixel points`);
+          if (pixelPoints.length < 9) {
+            console.warn(`  ⚠️ Skipping contour with < 9 points`);
+            continue;
+          }
+
+          // Log transformation parameters BEFORE conversion
+          console.log(`  🔧 Transform params: imgPos=[${imagePosition[0]?.toFixed(1)}, ${imagePosition[1]?.toFixed(1)}, ${imagePosition[2]?.toFixed(1)}]`);
+          console.log(`  🔧 rowDir=[${rowDir[0]?.toFixed(3)}, ${rowDir[1]?.toFixed(3)}, ${rowDir[2]?.toFixed(3)}]`);
+          console.log(`  🔧 colDir=[${colDir[0]?.toFixed(3)}, ${colDir[1]?.toFixed(3)}, ${colDir[2]?.toFixed(3)}]`);
+          console.log(`  🔧 spacing: row=${rowSpacing}, col=${columnSpacing}`);
+          console.log(`  🔧 First pixel: (${pixelPoints[0]}, ${pixelPoints[1]})`);
 
           // Convert pixel coordinates to world coordinates
           const worldPoints: number[] = [];
+          let invalidCount = 0;
+
           for (let i = 0; i < pixelPoints.length; i += 3) {
             const pixelX = pixelPoints[i];
             const pixelY = pixelPoints[i + 1];
+            // pixelPoints[i + 2] is always 0 (z component in 2D contour)
 
             // Convert pixel to world using DICOM transformation
-            const worldX = imagePosition[0] + (rowDir[0] * columnSpacing * pixelX) + (colDir[0] * rowSpacing * pixelY);
-            const worldY = imagePosition[1] + (rowDir[1] * columnSpacing * pixelX) + (colDir[1] * rowSpacing * pixelY);
-            const worldZ = imagePosition[2] + (rowDir[2] * columnSpacing * pixelX) + (colDir[2] * rowSpacing * pixelY);
+          const worldX = imagePosition[0] + (colDir[0] * columnSpacing * pixelX) + (rowDir[0] * rowSpacing * pixelY);
+          const worldY = imagePosition[1] + (colDir[1] * columnSpacing * pixelX) + (rowDir[1] * rowSpacing * pixelY);
+          const worldZ = imagePosition[2] + (colDir[2] * columnSpacing * pixelX) + (rowDir[2] * rowSpacing * pixelY);
+
+            // Validate
+            if (!Number.isFinite(worldX) || !Number.isFinite(worldY) || !Number.isFinite(worldZ)) {
+              invalidCount++;
+              if (invalidCount <= 2) {
+                console.error(`❌ Invalid world coord at pixel (${pixelX}, ${pixelY}): world=(${worldX}, ${worldY}, ${worldZ})`);
+                console.error(`   imagePosition=[${imagePosition.join(', ')}]`);
+                console.error(`   rowDir=[${rowDir.join(', ')}], colDir=[${colDir.join(', ')}]`);
+                console.error(`   spacing: row=${rowSpacing}, col=${columnSpacing}`);
+              }
+            }
 
             worldPoints.push(worldX, worldY, worldZ);
           }
 
-          structure.contours.push({
-            slicePosition,
+          if (invalidCount > 0) {
+            console.error(`❌ Total ${invalidCount} invalid world coordinates in this contour! Skipping.`);
+            continue;
+          }
+
+          const newContour = {
+            slicePosition: contourSlicePosition,  // Use TARGET CT Z position!
             points: worldPoints,
             numberOfPoints: worldPoints.length / 3,
-          });
+          };
+          structure.contours.push(newContour);
+
+          // Log sample of world coordinates for debugging
+          const samplePoints = worldPoints.slice(0, 9);
+          console.log(`  ✅ Added contour with ${worldPoints.length / 3} world points at TARGET Z=${contourSlicePosition}`);
+          console.log(`     Sample world coords: [${samplePoints.map(v => v.toFixed(1)).join(', ')}]`);
+          console.log(`     (Source MRI Z was ${slicePosition}, target CT Z is ${contourSlicePosition})`);
           contoursAdded++;
         }
       }
 
+      console.log(`\n📊 SUMMARY:
+        Total mask depth: ${depth}
+        Slices with pixels: ${slicesWithPixels}
+        Slices skipped (no metadata): ${slicesSkippedNoMetadata}
+        Slices processed: ${slicesProcessed}
+        Contours added: ${contoursAdded}
+        Structure now has ${structure.contours.length} total contours
+      `);
+
       log.info(`✅ Applied 3D mask: added ${contoursAdded} contours to structure ${structure.structureName}`, 'viewer');
 
+      if (contoursAdded === 0) {
+        console.error('❌ NO CONTOURS WERE ADDED! Not saving structures.');
+        log.error('No contours were added from 3D mask', 'viewer');
+        return; // Don't save if nothing was added
+      }
+
       // Update local structures and save to server
+      console.log('💾 Saving updated structures with', contoursAdded, 'new contours');
       setLocalRTStructures(updatedRTStructures);
       saveContourUpdates(updatedRTStructures, 'apply_3d_mask');
 
@@ -1301,7 +1490,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
       log.info('🎨 Triggered canvas re-render to display new contours', 'viewer');
 
     } catch (error) {
+      console.error('❌❌❌ ERROR in handleApply3DMask:', error);
       log.error(`Error applying 3D mask: ${String(error)}`, 'viewer');
+      // Don't save corrupted structures
     }
   };
 
@@ -5427,6 +5618,9 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
   ) => {
     if (contour.points.length < 6) return; // Need at least 2 points (x,y,z each)
 
+    // MRI DEBUG: Enable temporary logging to diagnose alignment issues
+    const MRI_DEBUG = window.location.search.includes('mri_debug=true');
+
     ctx.beginPath();
 
     // Normalize metadata using defensive parsing
@@ -5492,13 +5686,17 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
     const imageHeight = rows ?? 512;
 
     // REUSE the transform established by render16BitImage instead of recalculating
-    const transform = ctTransform.current ?? {
-      scale: Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom,
-      offsetX: (canvasWidth - imageWidth * Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom) / 2 + panX,
-      offsetY: (canvasHeight - imageHeight * Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight) * zoom) / 2 + panY,
+    const fallbackBaseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+    const fallbackTotalScale = fallbackBaseScale * zoom;
+    const fallbackTransform = {
+      scale: fallbackTotalScale,
+      offsetX: (canvasWidth - imageWidth * fallbackTotalScale) / 2 + panX,
+      offsetY: (canvasHeight - imageHeight * fallbackTotalScale) / 2 + panY,
       imageWidth,
-      imageHeight
+      imageHeight,
     };
+
+    const transform = ctTransform.current ?? fallbackTransform;
 
     // Set up animated dashed line for predicted contours
     if (contour.isPredicted && animationTime !== undefined) {
@@ -5767,22 +5965,28 @@ const WorkingViewer = forwardRef(function WorkingViewerComponent(props: WorkingV
         const imageWidth = images[currentIndex]?.columns || 512;
         const imageHeight = images[currentIndex]?.rows || 512;
         
-        // Calculate scale with zoom factor (same as render16BitImage)
-        const baseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
-        const totalScale = baseScale * zoom;
-        const scaledWidth = imageWidth * totalScale;
-        const scaledHeight = imageHeight * totalScale;
-        
-        // Center position with pan offset
-        const imageX = (canvasWidth - scaledWidth) / 2 + panX;
-        const imageY = (canvasHeight - scaledHeight) / 2 + panY;
+        const fallbackBaseScale = Math.min(canvasWidth / imageWidth, canvasHeight / imageHeight);
+        const fallbackTotalScale = fallbackBaseScale * zoom;
+        const fallbackTransform = {
+          scale: fallbackTotalScale,
+          offsetX: (canvasWidth - imageWidth * fallbackTotalScale) / 2 + panX,
+          offsetY: (canvasHeight - imageHeight * fallbackTotalScale) / 2 + panY,
+          imageWidth,
+          imageHeight,
+        };
+        const transform = ctTransform.current ?? fallbackTransform;
         
         // Convert canvas coordinates to image pixel coordinates
-        const pixelX = Math.floor((canvasX - imageX) / totalScale);
-        const pixelY = Math.floor((canvasY - imageY) / totalScale);
+        const pixelX = Math.floor((canvasX - transform.offsetX) / transform.scale);
+        const pixelY = Math.floor((canvasY - transform.offsetY) / transform.scale);
         
         // Check if within image bounds
-        if (pixelX >= 0 && pixelX < imageWidth && pixelY >= 0 && pixelY < imageHeight) {
+        if (
+          pixelX >= 0 &&
+          pixelX < (transform.imageWidth ?? imageWidth) &&
+          pixelY >= 0 &&
+          pixelY < (transform.imageHeight ?? imageHeight)
+        ) {
           setCrosshairPos({ x: pixelX, y: pixelY });
           console.log(`Crosshair repositioned to: ${pixelX}, ${pixelY}`);
           scheduleRender(); // Re-render to show new crosshair position

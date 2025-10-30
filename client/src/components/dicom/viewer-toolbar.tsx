@@ -53,6 +53,8 @@ interface ViewerToolbarProps {
   className?: string;
   onMPRToggle?: () => void;
   isMPRActive?: boolean;
+  onFusionToggle?: () => void;
+  isFusionActive?: boolean;
   onLocalization?: () => void;
   isLocalizationActive?: boolean;
   onUndo?: () => void;
@@ -87,6 +89,8 @@ export function ViewerToolbar({
   className,
   onMPRToggle,
   isMPRActive = false,
+  onFusionToggle,
+  isFusionActive = false,
   onLocalization,
   isLocalizationActive = false,
   onUndo,
@@ -126,7 +130,7 @@ export function ViewerToolbar({
     { id: 'measure', icon: Ruler, label: 'Measure', action: onMeasure, selectable: true },
     { id: 'separator' },
     { id: 'mpr', icon: Grid3x3, label: 'MPR View', action: onMPRToggle || (() => console.log('MPR Toggle not configured')), selectable: true },
-    { id: 'fusion', icon: Layers, label: 'New Fusion (Coming Soon)', action: () => console.log('New Fusion - Coming Soon') },
+    { id: 'fusion', icon: Layers, label: 'Fusion', action: onFusionToggle || (() => console.log('Fusion Toggle not configured')), selectable: true },
     { id: 'dose-plan', icon: Activity, label: 'Dose/Plan Review (Coming Soon)', action: () => console.log('Dose/Plan Review - Coming Soon') },
     { id: 'separator' },
     { id: 'localization', icon: Target, label: '🎯 Structure Localization', action: onLocalization || (() => console.log('🎯 Localization button clicked!')), selectable: true },

@@ -12,6 +12,7 @@ import { log } from '@/lib/log';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { CheckboxIndicator } from '@radix-ui/react-checkbox';
 import { Checkbox } from '@/components/ui/checkbox';
+import { AIStatusPanel } from '@/components/ai-status-panel';
 
 export default function Viewer() {
   const [studyData, setStudyData] = useState<any>(null);
@@ -308,6 +309,7 @@ export default function Viewer() {
               <List className="h-4 w-4 mr-2" />
               Patient List
             </Button>
+            <AIStatusPanel />
             <Button
               variant="ghost"
               size="sm"

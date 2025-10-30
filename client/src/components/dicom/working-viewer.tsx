@@ -1938,11 +1938,13 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       if (!structures) return;
       
       // Create hash of structures to check for changes
+      // Include slice positions of contours to detect deletions/additions on specific slices
       const structuresHash = JSON.stringify({
         count: structures.structures?.length || 0,
         contourCounts: structures.structures?.map((s: any) => ({
           id: s.roiNumber,
-          count: s.contours?.length || 0
+          count: s.contours?.length || 0,
+          slicePositions: s.contours?.map((c: any) => c.slicePosition).sort((a: number, b: number) => a - b) || []
         }))
       });
       
@@ -2509,15 +2511,22 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
     confidence: number;
     startSlice?: number;
     downsampleFactor?: number;
+    sourceImages?: any[]; // Images the mask was created from
+    isFusionMode?: boolean;
+    smoothOutput?: boolean; // Whether to apply double smoothing
   }) => {
     if (!rtStructures || !rtStructures.structures) return;
 
-    const { structureId, mask, confidence, startSlice = 0, downsampleFactor = 1 } = payload;
+    const { structureId, mask, confidence, startSlice = 0, downsampleFactor = 1, sourceImages, isFusionMode, smoothOutput = false } = payload;
     const structure = rtStructures.structures.find((s: any) => s.roiNumber === structureId);
     if (!structure) return;
 
+    // Use sourceImages if provided (from AI tumor tool), otherwise use global images with startSlice
+    const imagesToUse = sourceImages || images;
+    const maskStartIndex = sourceImages ? 0 : startSlice; // If using sourceImages, mask index 0 = sourceImages[0]
+
     log.debug(`Converting 3D mask to contours for structure ${structureId} (downsample: ${downsampleFactor}x)`, 'viewer');
-    log.debug(`Mask shape: [${mask.length}, ${mask[0]?.length || 0}, ${mask[0]?.[0]?.length || 0}], startSlice: ${startSlice}`, 'viewer');
+    log.debug(`Mask shape: [${mask.length}, ${mask[0]?.length || 0}, ${mask[0]?.[0]?.length || 0}], using ${sourceImages ? 'sourceImages' : 'global images'}, startIndex: ${maskStartIndex}`, 'viewer');
 
     // Create updated structures
     const updatedStructures = structuredClone ? structuredClone(rtStructures) : JSON.parse(JSON.stringify(rtStructures));
@@ -2550,6 +2559,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       }
 
       // Convert 2D array to Uint8Array for marching squares
+      // The mask is [height][width] = [y][x]
       const maskData = new Uint8Array(width * height);
       let nonZeroPixels = 0;
       for (let y = 0; y < height; y++) {
@@ -2567,11 +2577,32 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
 
       slicesWithMask++;
       console.log(`🧠 Slice ${z}: ${width}x${height}, ${nonZeroPixels} positive pixels`);
+
+      // Find first non-zero pixel for debugging
+      let firstMaskX = -1, firstMaskY = -1;
+      for (let y = 0; y < height && firstMaskX === -1; y++) {
+        for (let x = 0; x < width; x++) {
+          if (sliceMask[y][x] > 0) {
+            firstMaskX = x;
+            firstMaskY = y;
+            break;
+          }
+        }
+      }
+      console.log(`🧠 Slice ${z}: First non-zero pixel in mask at (x=${firstMaskX}, y=${firstMaskY})`);
+
+      // Sample center region to verify mask data orientation
+      const centerY = Math.floor(height / 2);
+      const centerX = Math.floor(width / 2);
+      const centerSample = sliceMask[centerY]?.[centerX] || 0;
+      const clickSample = sliceMask[firstMaskY]?.[firstMaskX] || 0;
+      console.log(`🧠 Slice ${z}: Mask at CENTER (${centerX},${centerY})=${centerSample}, at FIRST_NONZERO (${firstMaskX},${firstMaskY})=${clickSample}`);
+
       log.debug(`Slice ${z}: ${width}x${height}, ${nonZeroPixels} positive pixels`, 'viewer');
 
       // Find contours using marching squares algorithm
       const pixelContours = marchingSquares(maskData, width, height);
-      console.log(`🧠 Slice ${z}: marchingSquares returned ${pixelContours.length / 2} points`);
+      console.log(`🧠 Slice ${z}: marchingSquares returned ${pixelContours.length / 2} points, first contour point: (x=${pixelContours[0]}, y=${pixelContours[1]})`);
 
       if (pixelContours.length < 6) {
         console.log(`🧠 Slice ${z}: Contour too small (${pixelContours.length / 2} points), skipping`);
@@ -2583,26 +2614,74 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       log.debug(`Slice ${z}: Found contour with ${pixelContours.length / 2} points`, 'viewer');
 
       // Get the actual image for this slice to get correct Z position AND coordinate metadata
-      const imageIndex = startSlice + z;
-      if (!images || imageIndex >= images.length) {
-        log.error(`Image index ${imageIndex} out of bounds (total: ${images?.length})`, 'viewer');
+      const imageIndex = maskStartIndex + z;
+      if (!imagesToUse || imageIndex >= imagesToUse.length) {
+        log.error(`Image index ${imageIndex} out of bounds (total: ${imagesToUse?.length})`, 'viewer');
         continue;
       }
 
-      const sliceImage = images[imageIndex];
+      const sliceImage = imagesToUse[imageIndex];
+
+      // Log image properties for first slice to debug what we're getting
+      if (contoursAdded === 0) {
+        console.log(`🧠 First slice image properties:`, Object.keys(sliceImage).join(', '));
+      }
+
       const slicePosition = sliceImage.sliceZ ?? sliceImage.parsedSliceLocation ?? sliceImage.parsedZPosition ?? 0;
 
-      // Get metadata for THIS specific slice (not the global imageMetadata)
-      const slicePixelSpacing = sliceImage.pixelSpacing || [1, 1];
-      const sliceImagePosition = sliceImage.imagePosition || [0, 0, slicePosition];
-      
+      // Use the same metadata extraction helper that works in ai-tumor-tool
+      const parseDICOMVector = (val: any, expectedLength: number): number[] | null => {
+        if (Array.isArray(val) && val.length >= expectedLength) return val;
+        if (typeof val === 'string') {
+          const parsed = val.split('\\').map((s: string) => parseFloat(s)).filter((n: number) => Number.isFinite(n));
+          if (parsed.length >= expectedLength) return parsed;
+        }
+        return null;
+      };
+
+      const sliceImagePosition = parseDICOMVector(sliceImage.imagePosition, 3)
+        || parseDICOMVector(sliceImage.imagePositionPatient, 3)
+        || parseDICOMVector(sliceImage.metadata?.imagePositionPatient, 3)
+        || parseDICOMVector(sliceImage.metadata?.imagePosition, 3)
+        || [0, 0, slicePosition];
+
+      const slicePixelSpacing = parseDICOMVector(sliceImage.pixelSpacing, 2)
+        || parseDICOMVector(sliceImage.metadata?.pixelSpacing, 2)
+        || [1, 1];
+
+      const sliceOrientation = parseDICOMVector(sliceImage.imageOrientationPatient, 6)
+        || parseDICOMVector(sliceImage.imageOrientation, 6)
+        || parseDICOMVector(sliceImage.metadata?.imageOrientationPatient, 6)
+        || parseDICOMVector(sliceImage.metadata?.imageOrientation, 6)
+        || [1, 0, 0, 0, 1, 0];
+
+      // DICOM ImageOrientationPatient: first 3 = row direction (X axis), last 3 = column direction (Y axis)
+      // "row direction" = direction along which columns increase (horizontal for standard axial)
+      // "column direction" = direction along which rows increase (vertical for standard axial)
+      const rowDir = [sliceOrientation[0], sliceOrientation[1], sliceOrientation[2]];
+      const colDir = [sliceOrientation[3], sliceOrientation[4], sliceOrientation[5]];
+      // DICOM PixelSpacing: [0] = row spacing (vertical), [1] = column spacing (horizontal)
+      const rowSpacing = slicePixelSpacing[0];
+      const colSpacing = slicePixelSpacing[1];
+
       if (contoursAdded === 0 && slicesWithMask === 1) {
         // Log metadata for first slice with tumor
         console.log(`🧠 First tumor slice (${z}) metadata:`, {
           imageIndex,
           slicePosition,
           pixelSpacing: slicePixelSpacing,
-          imagePosition: sliceImagePosition
+          imagePosition: sliceImagePosition,
+          orientation: sliceOrientation,
+          rowDir,
+          colDir,
+          maskDimensions: {width, height},
+          imageDimensions: {
+            columns: sliceImage.columns,
+            rows: sliceImage.rows
+          },
+          downsampleFactor,
+          startSlice,
+          firstPixelCoord: [pixelContours[0], pixelContours[1]]
         });
       }
 
@@ -2612,27 +2691,41 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       // Need to account for downsampling - mask is at lower resolution
       const worldContour: number[] = [];
       for (let i = 0; i < pixelContours.length; i += 2) {
-        const downsampledPixelX = pixelContours[i];
-        const downsampledPixelY = pixelContours[i + 1];
+        // Marching squares returns (x, y) where x=column, y=row
+        const downsampledColumn = pixelContours[i];
+        const downsampledRow = pixelContours[i + 1];
 
         // Upsample back to original resolution
-        const pixelX = downsampledPixelX * downsampleFactor;
-        const pixelY = downsampledPixelY * downsampleFactor;
+        const column = downsampledColumn * downsampleFactor;
+        const row = downsampledRow * downsampleFactor;
 
-        // Convert to world coordinates using THIS slice's metadata
-        // pixelSpacing[0] = row spacing (Y), pixelSpacing[1] = column spacing (X)
-        const worldX = sliceImagePosition[0] + pixelX * slicePixelSpacing[1];
-        const worldY = sliceImagePosition[1] + pixelY * slicePixelSpacing[0];
-        const worldZ = slicePosition;
+        // DICOM pixel-to-world transform:
+        // world = imagePosition + rowDir * colSpacing * column + colDir * rowSpacing * row
+        // (rowDir goes with column because it's the direction along which columns increase)
+        // (colDir goes with row because it's the direction along which rows increase)
+        const worldX = sliceImagePosition[0] + (rowDir[0] * colSpacing * column) + (colDir[0] * rowSpacing * row);
+        const worldY = sliceImagePosition[1] + (rowDir[1] * colSpacing * column) + (colDir[1] * rowSpacing * row);
+        const worldZ = sliceImagePosition[2] + (rowDir[2] * colSpacing * column) + (colDir[2] * rowSpacing * row);
 
         worldContour.push(worldX, worldY, worldZ);
+      }
+      
+      // Apply smoothing if requested (2x smoothing as specified)
+      let finalContour = worldContour;
+      if (smoothOutput) {
+        // Apply smoothing twice for smoother output
+        const contourObj = { points: worldContour, slicePosition };
+        const smoothed1 = smoothContour(contourObj, 0.25);
+        const smoothed2 = smoothContour(smoothed1, 0.25);
+        finalContour = smoothed2.points;
+        log.debug(`Slice ${z}: Applied 2x smoothing (${worldContour.length / 3} → ${finalContour.length / 3} points)`, 'viewer');
       }
       
       // Add contour to structure
       updatedStructure.contours.push({
         slicePosition,
-        points: worldContour,
-        numberOfPoints: worldContour.length / 3
+        points: finalContour,
+        numberOfPoints: finalContour.length / 3
       });
 
       contoursAdded++;
@@ -4197,6 +4290,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
   // Expose methods to parent component
   useImperativeHandle(ref, () => ({
     handleContourUpdate,
+    canvasRef, // Expose canvas ref for toolbar to access
     setPanMode: () => {
       setIsPanMode(true);
       setCrosshairMode(false);
@@ -6203,6 +6297,12 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       .map(Number)
       .filter((n: number) => Number.isFinite(n)) || [1.171875, 1.171875];
 
+    // Parse Image Orientation Patient - CRITICAL for MRI registration
+    const imageOrientation = imgMetadata.imageOrientation
+      ?.split("\\")
+      .map(Number)
+      .filter((n: number) => Number.isFinite(n)) || [1, 0, 0, 0, 1, 0]; // Default to identity
+
     // Clamp spacing to avoid zeros
     const EPSILON = 1e-6;
     const rowSpacing = Math.abs(pixelSpacing[0]) > EPSILON ? pixelSpacing[0] : 1;
@@ -6234,15 +6334,46 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
       ctx.lineDashOffset = 0;
     }
 
+    // Normalize orientation vectors to unit length - CRITICAL for accurate registration
+    const normalizeVector = (vec: number[]): number[] => {
+      const mag = Math.sqrt(vec[0] * vec[0] + vec[1] * vec[1] + vec[2] * vec[2]);
+      if (mag < EPSILON) return vec; // Return as-is if too small
+      return [vec[0] / mag, vec[1] / mag, vec[2] / mag];
+    };
+
+    // Extract row and column direction cosines from Image Orientation Patient
+    // DICOM standard: first 3 values = row direction (X), last 3 = column direction (Y)
+    const rowCosines = normalizeVector([
+      imageOrientation[0],
+      imageOrientation[1],
+      imageOrientation[2],
+    ]);
+    const colCosines = normalizeVector([
+      imageOrientation[3],
+      imageOrientation[4],
+      imageOrientation[5],
+    ]);
+
+    // Helper function for dot product
+    const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
     // Convert DICOM world coordinates to canvas coordinates
     for (let i = 0; i < contour.points.length; i += 3) {
       const worldX = contour.points[i]; // DICOM X coordinate
       const worldY = contour.points[i + 1]; // DICOM Y coordinate
+      const worldZ = contour.points[i + 2]; // DICOM Z coordinate
 
-      // Convert world coordinates to pixel coordinates
-      // DICOM pixel spacing is [row spacing, column spacing] = [deltaY, deltaX]
-      const pixelX = (worldX - imagePosition[0]) / columnSpacing;
-      const pixelY = (worldY - imagePosition[1]) / rowSpacing;
+      // Relative position from image origin
+      const rel = [
+        worldX - imagePosition[0],
+        worldY - imagePosition[1],
+        worldZ - imagePosition[2],
+      ];
+
+      // Project onto image plane using orientation vectors (handles oblique/rotated scans)
+      // This is ESSENTIAL for MRI which often has non-standard orientations
+      const pixelX = dot(rel, rowCosines) / columnSpacing;
+      const pixelY = dot(rel, colCosines) / rowSpacing;
 
       // Apply the established transform to map pixel coordinates to canvas
       const canvasX = transform.offsetX + (pixelX * transform.scale);
@@ -7122,30 +7253,6 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
                 </span>
               </div>
             )}
-            <Button
-              size="sm"
-              variant="ghost"
-              className="h-8 px-2 text-xs hover:bg-gray-700/40"
-              onClick={() => { setFusionDebugText(compileFusionDebug()); setShowFusionDebug(true); }}
-              title="Open Fusion Debug"
-            >
-              Fusion Debug
-            </Button>
-            
-            {/* Background Loading Progress */}
-            {prefetchProgress.total > 0 && prefetchProgress.loaded > 0 && prefetchProgress.loaded < prefetchProgress.total && !isLoading && (
-              <div className="flex items-center space-x-2 px-3 py-1.5 bg-gray-800/50 rounded-lg">
-                <div className="w-24 bg-gray-700 rounded-full h-1.5 overflow-hidden">
-                  <div 
-                    className="bg-gradient-to-r from-green-500 to-green-400 h-1.5 rounded-full transition-all duration-300 ease-out"
-                    style={{ width: `${(prefetchProgress.loaded / prefetchProgress.total) * 100}%` }}
-                  />
-                </div>
-                <span className="text-xs text-gray-300">
-                  {Math.round((prefetchProgress.loaded / prefetchProgress.total) * 100)}% ({prefetchProgress.loaded}/{prefetchProgress.total})
-                </span>
-              </div>
-            )}
             
             <Button
               size="sm"
@@ -7661,7 +7768,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
               />
             )}
 
-          {/* AI Tumor Tool - Interactive 3D segmentation with scribbles */}
+          {/* AI Tumor Tool - Interactive 3D segmentation with single click */}
           {brushToolState?.isActive &&
             brushToolState?.tool === "interactive-tumor" && selectedForEdit && (
               <AITumorTool
@@ -7702,6 +7809,7 @@ const lastViewedContourSliceRef = useRef<number | null>(null);
                 imageCacheRef={imageCacheRef}
                 secondarySeriesId={secondarySeriesId}
                 registrationMatrix={registrationMatrix}
+                smoothOutput={(brushToolState as any)?.aiTumorSmoothOutput ?? false}
                 onShowPrimarySeries={() => {
                   // Switch back to primary series to show CT contours
                   if (onSecondarySeriesChange) {

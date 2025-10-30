@@ -17,6 +17,16 @@ from flask_cors import CORS
 import SimpleITK as sitk
 from typing import Dict, List, Optional, Tuple
 import traceback
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+
+try:
+    from huggingface_hub.utils import LocalEntryNotFoundError
+except (ImportError, AttributeError):
+    class LocalEntryNotFoundError(FileNotFoundError):
+        """Compatibility shim when huggingface_hub does not expose the exception."""
+        pass
 
 # Configure logging
 logging.basicConfig(
@@ -46,6 +56,11 @@ class NNInteractiveModel:
         self.device_name = device_name
         self.model = None
         self.initialized = False
+        self.device = None
+        self.weights_dir = Path(os.environ.get('NNINTERACTIVE_WEIGHTS_DIR', Path(__file__).parent / 'weights')).resolve()
+        self.repo_id = os.environ.get('NNINTERACTIVE_REPO_ID', 'nnInteractive/nnInteractive')
+        self.model_name = os.environ.get('NNINTERACTIVE_MODEL_NAME', 'nnInteractive_v1.0')
+        self.allow_download = os.environ.get('NNINTERACTIVE_ALLOW_DOWNLOAD', '').lower() in {'1', 'true', 'yes'}
 
     def load_model(self):
         """Load the nnInteractive model"""
@@ -57,43 +72,115 @@ class NNInteractiveModel:
                 self.device = torch.device('cuda')
                 logger.info(f"Using GPU: {torch.cuda.get_device_name(0)}")
                 logger.info(f"GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+            elif self.device_name == 'mps' and getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available():
+                self.device = torch.device('mps')
+                logger.info("Using Apple Metal (MPS) GPU")
             else:
                 self.device = torch.device('cpu')
-                logger.info("Using CPU (GPU not available or not requested)")
+                if self.device_name == 'cuda':
+                    logger.warning("CUDA requested but not available. Falling back to CPU (may be slower).")
+                else:
+                    logger.info("Using CPU (fast enough for small volumes; expect slower inference).")
 
             # Import nnInteractive
+            # Add nnInteractive repo to import path
+            nninteractive_path = os.path.join(os.path.dirname(__file__), 'nnInteractive')
+            if os.path.exists(nninteractive_path):
+                sys.path.insert(0, nninteractive_path)
+
+            logger.info("Loading nnInteractive model...")
+
             try:
-                # Add nnInteractive to path
-                nninteractive_path = os.path.join(os.path.dirname(__file__), 'nnInteractive')
-                if os.path.exists(nninteractive_path):
-                    sys.path.insert(0, nninteractive_path)
-
-                # Import nnInteractive modules
-                # Note: This is a placeholder - actual import depends on nnInteractive structure
-                # You'll need to adjust based on the actual nnInteractive API
-                logger.info("Loading nnInteractive model...")
-
-                # Placeholder for actual model loading
-                # from nninteractive import NNInteractive
-                # self.model = NNInteractive(device=self.device)
-                # self.model.load_checkpoint('path/to/checkpoint')
-
-                # For now, use a mock model for development
-                logger.warning("Using MOCK model - install nnInteractive for production use")
-                self.model = MockNNInteractive(self.device)
-
-                self.initialized = True
-                logger.info("nnInteractive model loaded successfully")
-
+                from nnInteractive.inference.inference_session import nnInteractiveInferenceSession
             except ImportError as e:
                 logger.error(f"Failed to import nnInteractive: {e}")
                 logger.info("Install nnInteractive: https://github.com/MIC-DKFZ/nnInteractive")
                 raise
 
+            try:
+                weights_path = self._resolve_weights()
+            except Exception as weight_error:
+                logger.error(f"Failed to prepare nnInteractive weights: {weight_error}")
+                raise
+
+            try:
+                session = nnInteractiveInferenceSession(
+                    device=self.device,
+                    use_torch_compile=False,
+                    verbose=False,
+                    torch_n_threads=os.cpu_count() or 8,
+                    do_autozoom=True,
+                    use_pinned_memory=(self.device.type == 'cuda')
+                )
+
+                session.initialize_from_trained_model_folder(str(weights_path))
+                self.model = session
+                self.initialized = True
+                logger.info(f"✅ nnInteractive model loaded successfully on {self.device.type.upper()}")
+
+                if self.device.type != 'cuda':
+                    logger.info("Note: Running nnInteractive on CPU/MPS. Expect higher latency than GPU inference.")
+
+            except Exception as model_error:
+                logger.warning(f"Failed to load nnInteractive model on {self.device}: {model_error}")
+                logger.warning("Falling back to MOCK model implementation.")
+                self.model = MockNNInteractive(self.device)
+                self.initialized = True
+
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             logger.error(traceback.format_exc())
             raise
+
+    def _resolve_weights(self) -> Path:
+        """
+        Ensure nnInteractive weights are available locally, downloading if permitted.
+        """
+        target_dir = self.weights_dir / self.model_name
+        if target_dir.exists():
+            logger.info(f"Using cached nnInteractive weights at {target_dir}")
+            return target_dir
+
+        self.weights_dir.mkdir(parents=True, exist_ok=True)
+
+        # Try local cache via HuggingFace hub
+        try:
+            snapshot_path = snapshot_download(
+                repo_id=self.repo_id,
+                allow_patterns=[f"{self.model_name}/*"],
+                local_dir=str(self.weights_dir),
+                local_files_only=True
+            )
+            logger.info(f"Found nnInteractive weights in local HuggingFace cache: {snapshot_path}")
+        except LocalEntryNotFoundError:
+            if not self.allow_download:
+                raise RuntimeError(
+                    "nnInteractive weights not found in local cache. "
+                    f"Place the '{self.model_name}' folder under '{self.weights_dir}' "
+                    "or set NNINTERACTIVE_ALLOW_DOWNLOAD=1 to enable online download."
+                )
+            logger.info("Local nnInteractive weights not found. Attempting download from HuggingFace...")
+            snapshot_path = snapshot_download(
+                repo_id=self.repo_id,
+                allow_patterns=[f"{self.model_name}/*"],
+                local_dir=str(self.weights_dir),
+                local_files_only=False
+            )
+            logger.info(f"Downloaded nnInteractive weights to {snapshot_path}")
+
+        candidate = Path(snapshot_path) / self.model_name
+        if candidate.exists():
+            return candidate
+
+        # In some cases snapshot_download returns the exact directory
+        snapshot_dir = Path(snapshot_path)
+        if snapshot_dir.exists() and snapshot_dir.name == self.model_name:
+            return snapshot_dir
+
+        raise RuntimeError(
+            f"Unable to locate nnInteractive weights in snapshot at {snapshot_path}. "
+            f"Expected folder '{self.model_name}'."
+        )
 
     def segment_from_scribbles(
         self,
@@ -124,15 +211,61 @@ class NNInteractiveModel:
             raise RuntimeError("Model not initialized")
 
         try:
-            # Prepare prompts
-            prompts = self._prepare_prompts(scribbles, point_prompts, box_prompt)
+            # Check if using mock or real model
+            if isinstance(self.model, MockNNInteractive):
+                # Use mock model predict
+                prompts = self._prepare_prompts(scribbles, point_prompts, box_prompt)
+                mask, confidence = self.model.predict(
+                    volume=volume,
+                    prompts=prompts,
+                    spacing=spacing
+                )
+            else:
+                # Use real nnInteractive session
+                import torch
 
-            # Run inference
-            mask, confidence = self.model.predict(
-                volume=volume,
-                prompts=prompts,
-                spacing=spacing
-            )
+                # Set image in session (expects shape (1, Z, Y, X))
+                volume_4d = volume[None, ...] if volume.ndim == 3 else volume
+                self.model.set_image(volume_4d)
+
+                # Create output buffer
+                target_tensor = torch.zeros(volume.shape, dtype=torch.uint8)
+                self.model.set_target_buffer(target_tensor)
+
+                # Process scribbles - create scribble images for each slice
+                for scribble in scribbles:
+                    slice_idx = scribble['slice']
+                    points = np.array(scribble['points'])
+                    label = scribble.get('label', 1)
+
+                    # Create scribble image (same shape as volume)
+                    scribble_image = np.zeros(volume.shape, dtype=np.uint8)
+
+                    # Draw scribble on the specific slice
+                    if len(points) > 0:
+                        # Convert points to integer coordinates
+                        points_int = points.astype(int)
+
+                        # Fill pixels along scribble path
+                        for i in range(len(points_int)):
+                            x, y = points_int[i]
+                            if 0 <= x < volume.shape[2] and 0 <= y < volume.shape[1]:
+                                scribble_image[slice_idx, y, x] = 1
+
+                                # Make scribble thicker (3x3 kernel)
+                                for dx in [-1, 0, 1]:
+                                    for dy in [-1, 0, 1]:
+                                        nx, ny = x + dx, y + dy
+                                        if 0 <= nx < volume.shape[2] and 0 <= ny < volume.shape[1]:
+                                            scribble_image[slice_idx, ny, nx] = 1
+
+                    # Add scribble interaction
+                    include_interaction = (label == 1)  # True for foreground, False for background
+                    self.model.add_scribble_interaction(scribble_image, include_interaction=include_interaction)
+
+                # Get final mask from target buffer
+                mask = target_tensor.cpu().numpy()
+                confidence = 0.95  # Real model, assume high confidence
 
             # Recommend next slice for refinement
             recommended_slice = self._recommend_slice(mask, scribbles)
@@ -229,42 +362,140 @@ class MockNNInteractive:
     def __init__(self, device):
         self.device = device
         logger.info("Using MOCK nnInteractive model")
+        logger.info("For better AI segmentation, use SegVol or Mem3D services instead")
 
     def predict(self, volume: np.ndarray, prompts: Dict, spacing: Tuple) -> Tuple[np.ndarray, float]:
         """
-        Mock prediction - creates a simple growing region from scribbles
+        Mock prediction - creates a region growing segmentation from scribbles
         """
         logger.info(f"MOCK prediction on volume shape: {volume.shape}")
 
         # Create empty mask
         mask = np.zeros(volume.shape, dtype=np.uint8)
 
-        # For each scribble, create a blob around it
+        # For each foreground scribble, perform region growing
         for scribble in prompts.get('scribbles', []):
+            if scribble.get('label', 1) != 1:  # Skip background scribbles for now
+                continue
+                
             slice_idx = scribble['slice']
             coords = scribble['coords']
 
-            if len(coords) > 0:
-                # Get bounding box of scribble
+            if len(coords) > 0 and 0 <= slice_idx < volume.shape[0]:
+                # Perform region growing on this slice
+                slice_data = volume[slice_idx]
+                slice_mask = self._region_grow_2d(slice_data, coords)
+                
+                # Apply to neighboring slices with decay
+                for dz in range(-3, 4):
+                    z = slice_idx + dz
+                    if 0 <= z < volume.shape[0]:
+                        decay_factor = 1.0 - (abs(dz) * 0.25)  # Decay by 25% per slice
+                        if decay_factor > 0:
+                            # Slightly erode mask for other slices
+                            if dz != 0:
+                                eroded_mask = self._erode_mask(slice_mask, iterations=abs(dz))
+                                mask[z] = np.maximum(mask[z], (eroded_mask * decay_factor).astype(np.uint8))
+                            else:
+                                mask[z] = np.maximum(mask[z], slice_mask)
+
+        # Apply background scribbles to remove regions
+        for scribble in prompts.get('scribbles', []):
+            if scribble.get('label', 1) != 0:  # Only background scribbles
+                continue
+                
+            slice_idx = scribble['slice']
+            coords = scribble['coords']
+            
+            if len(coords) > 0 and 0 <= slice_idx < volume.shape[0]:
+                # Create exclusion region around background scribbles
                 coords = np.array(coords)
-                x_min, y_min = coords.min(axis=0).astype(int)
-                x_max, y_max = coords.max(axis=0).astype(int)
+                for coord in coords:
+                    x, y = coord.astype(int)
+                    # Clear a region around each background point
+                    for dy in range(-10, 11):
+                        for dx in range(-10, 11):
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < volume.shape[1] and 0 <= nx < volume.shape[2]:
+                                # Clear in 3D neighborhood
+                                for dz in range(-2, 3):
+                                    z = slice_idx + dz
+                                    if 0 <= z < volume.shape[0]:
+                                        mask[z, ny, nx] = 0
 
-                # Expand region slightly
-                margin = 20
-                x_min = max(0, x_min - margin)
-                y_min = max(0, y_min - margin)
-                x_max = min(volume.shape[2] - 1, x_max + margin)
-                y_max = min(volume.shape[1] - 1, y_max + margin)
-
-                # Fill region on this slice and neighbors
-                for z in range(max(0, slice_idx - 2), min(volume.shape[0], slice_idx + 3)):
-                    mask[z, y_min:y_max, x_min:x_max] = 1
-
-        # Mock confidence
-        confidence = 0.75
+        # Mock confidence based on how much was segmented
+        segmented_ratio = np.sum(mask) / mask.size
+        confidence = min(0.85, 0.5 + segmented_ratio * 10)  # Scale confidence
 
         return mask, confidence
+    
+    def _region_grow_2d(self, image: np.ndarray, seed_coords: np.ndarray, tolerance: float = 30) -> np.ndarray:
+        """Simple region growing from seed points"""
+        mask = np.zeros(image.shape, dtype=np.uint8)
+        
+        # Get seed points and their mean intensity
+        seed_coords = np.array(seed_coords).astype(int)
+        seed_values = []
+        for coord in seed_coords:
+            x, y = coord
+            if 0 <= y < image.shape[0] and 0 <= x < image.shape[1]:
+                seed_values.append(image[y, x])
+                mask[y, x] = 1
+        
+        if not seed_values:
+            return mask
+            
+        mean_intensity = np.mean(seed_values)
+        
+        # Region growing using flood fill
+        from collections import deque
+        queue = deque()
+        
+        # Add all seed points to queue
+        for coord in seed_coords:
+            x, y = coord
+            if 0 <= y < image.shape[0] and 0 <= x < image.shape[1]:
+                queue.append((x, y))
+        
+        # 8-connected neighbors
+        neighbors = [(-1,-1), (-1,0), (-1,1), (0,-1), (0,1), (1,-1), (1,0), (1,1)]
+        
+        processed = set()
+        while queue:
+            x, y = queue.popleft()
+            
+            if (x, y) in processed:
+                continue
+            processed.add((x, y))
+            
+            for dx, dy in neighbors:
+                nx, ny = x + dx, y + dy
+                
+                if (0 <= nx < image.shape[1] and 0 <= ny < image.shape[0] and 
+                    mask[ny, nx] == 0 and (nx, ny) not in processed):
+                    
+                    # Check if pixel intensity is within tolerance
+                    if abs(image[ny, nx] - mean_intensity) <= tolerance:
+                        mask[ny, nx] = 1
+                        queue.append((nx, ny))
+        
+        return mask
+    
+    def _erode_mask(self, mask: np.ndarray, iterations: int = 1) -> np.ndarray:
+        """Simple binary erosion"""
+        result = mask.copy()
+        
+        for _ in range(iterations):
+            temp = np.zeros_like(result)
+            for y in range(1, mask.shape[0] - 1):
+                for x in range(1, mask.shape[1] - 1):
+                    # Only keep if all 4-neighbors are set
+                    if (result[y-1, x] and result[y+1, x] and 
+                        result[y, x-1] and result[y, x+1]):
+                        temp[y, x] = 1
+            result = temp
+            
+        return result
 
 
 # Flask Routes
@@ -423,8 +654,8 @@ def main():
     # Parse arguments
     import argparse
     parser = argparse.ArgumentParser(description='nnInteractive Segmentation Service')
-    parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu'],
-                       help='Device to use (cuda or cpu)')
+    parser.add_argument('--device', type=str, default='cuda', choices=['cuda', 'cpu', 'mps'],
+                       help='Device to use (cuda, cpu, or mps for Apple Metal)')
     parser.add_argument('--port', type=int, default=5003,
                        help='Port to run service on')
     parser.add_argument('--host', type=str, default='127.0.0.1',

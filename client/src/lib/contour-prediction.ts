@@ -12,7 +12,8 @@ import {
   type RegionCharacteristics
 } from './image-aware-prediction';
 import { segvolClient, type SegVolPredictionRequest } from './segvol-client';
-import { mem3dClient, type Mem3DPredictionRequest, type Mem3DReferenceSlice } from './mem3d-client';
+import { monaiClient, type MonaiPredictionRequest } from './monai-client';
+import { fastSlicePrediction } from "./fast-slice-prediction";
 
 export type PropagationMode = 'conservative' | 'moderate' | 'aggressive';
 
@@ -21,11 +22,11 @@ export interface PredictionParams {
   currentSlicePosition: number;
   targetSlicePosition: number;
   anatomicalRegion?: 'head' | 'neck' | 'thorax' | 'abdomen' | 'pelvis';
-  predictionMode?: 'simple' | 'adaptive' | 'trend-based' | 'segvol' | 'mem3d';
+  predictionMode?: 'simple' | 'adaptive' | 'trend-based' | 'segvol' | 'monai' | 'mem3d';
   confidenceThreshold?: number; // 0-1, determines when to stop propagating
   historyManager?: PredictionHistoryManager;
   allContours?: Map<number, number[]>; // All contours in the structure by slice position
-  
+
   // Image-aware refinement (optional)
   imageData?: {
     currentSlice?: ImageData;
@@ -37,6 +38,10 @@ export interface PredictionParams {
     pixelToWorld: (x: number, y: number) => [number, number];
   };
   enableImageRefinement?: boolean;
+
+  // MEM3D tuning parameters (optional)
+  mem3dParams?: import('./fast-slice-prediction').PredictionParams;
+  spacing?: [number, number, number]; // [x, y, z] spacing in mm
 }
 
 export interface PredictionResult {
@@ -60,6 +65,9 @@ export interface PredictionResult {
     };
     fallbackApplied?: boolean;
     notes?: string;
+    qualityScore?: number; // Quality assessment from AI models
+    used_slices?: number[]; // Slice positions used in prediction
+    distance_to_nearest?: number; // Distance to nearest reference slice
   };
 }
 
@@ -494,6 +502,9 @@ async function segvolPrediction(
   imageData?: {
     currentSlice?: ImageData;
     targetSlice?: ImageData;
+    referenceSlices?: { contour: number[]; imageData: ImageData }[];
+    volumeSlices?: ImageData[];
+    volumePositions?: number[];
   },
   coordinateTransforms?: {
     worldToPixel: (x: number, y: number) => [number, number];
@@ -522,16 +533,84 @@ async function segvolPrediction(
       contour2D.push([Math.round(px), Math.round(py)]);
     }
 
-    // Prepare SegVol request
+    // Extract all available DICOM slices for proper 3D context
+    let volumeSlices: number[][] | undefined;
+    let volumePositions: number[] | undefined;
+
+    if (
+      imageData.volumeSlices &&
+      imageData.volumePositions &&
+      imageData.volumeSlices.length === imageData.volumePositions.length
+    ) {
+      const MIN_VOLUME_CONTEXT = 32;
+      const MAX_VOLUME_CONTEXT = 48;
+      const combined = imageData.volumeSlices
+        .map((sliceData, idx) => {
+          const position = imageData.volumePositions?.[idx];
+          if (!sliceData?.pixels || position == null) {
+            return null;
+          }
+          return {
+            sliceData,
+            position,
+            originalIndex: idx,
+          };
+        })
+        .filter((entry): entry is { sliceData: ImageData; position: number; originalIndex: number } => entry !== null);
+
+      if (combined.length >= MIN_VOLUME_CONTEXT) {
+        const centerPosition = (currentSlicePosition + targetSlicePosition) / 2;
+
+        let centerIndex = 0;
+        let minDistance = Number.POSITIVE_INFINITY;
+        for (let idx = 0; idx < combined.length; idx++) {
+          const distance = Math.abs(combined[idx].position - centerPosition);
+          if (distance < minDistance) {
+            minDistance = distance;
+            centerIndex = idx;
+          }
+        }
+
+        let start = Math.max(0, centerIndex - Math.floor(MAX_VOLUME_CONTEXT / 2));
+        let end = Math.min(combined.length, start + MAX_VOLUME_CONTEXT);
+        if (end - start < MAX_VOLUME_CONTEXT) {
+          start = Math.max(0, end - MAX_VOLUME_CONTEXT);
+        }
+
+        let selected = combined.slice(start, end);
+
+        if (selected.length > MAX_VOLUME_CONTEXT) {
+          const step = Math.ceil(selected.length / MAX_VOLUME_CONTEXT);
+          selected = selected.filter((_, idx) => idx % step === 0).slice(0, MAX_VOLUME_CONTEXT);
+        }
+
+        selected.sort((a, b) => a.originalIndex - b.originalIndex);
+        volumeSlices = selected.map(entry => Array.from(entry.sliceData.pixels));
+        volumePositions = selected.map(entry => entry.position);
+        console.log(
+          `📊 SegVol volume context truncated: ${combined.length}→${volumeSlices.length} slices (center index ${centerIndex})`
+        );
+      } else if (combined.length > 0) {
+        volumeSlices = combined.map(entry => Array.from(entry.sliceData.pixels));
+        volumePositions = combined.map(entry => entry.position);
+        console.log(`📊 SegVol volume context using ${volumeSlices.length} slices (below truncation threshold)`);
+      }
+    }
+
+    // Prepare SegVol request with optional volume data
     const request: SegVolPredictionRequest = {
       reference_contour: contour2D,
-      reference_slice_data: Array.from(imageData.currentSlice.pixelData),
-      target_slice_data: Array.from(imageData.targetSlice.pixelData),
+      reference_slice_data: imageData.currentSlice?.pixels ? Array.from(imageData.currentSlice.pixels) : [],
+      target_slice_data: imageData.targetSlice?.pixels ? Array.from(imageData.targetSlice.pixels) : [],
       reference_slice_position: currentSlicePosition,
       target_slice_position: targetSlicePosition,
-      image_shape: [imageData.currentSlice.rows, imageData.currentSlice.columns] as [number, number],
+      image_shape: [imageData.currentSlice?.height || 512, imageData.currentSlice?.width || 512] as [number, number],
       spacing: spacing || [1.0, 1.0, 1.0],
+      volume_slices: volumeSlices && volumeSlices.length >= 32 ? volumeSlices : undefined,
+      volume_positions: volumePositions && volumePositions.length >= 32 ? volumePositions : undefined,
     };
+
+    console.log(`📊 SegVol request: ${volumeSlices?.length ?? 0} volume slices available`);
 
     // Call SegVol API
     const result = await segvolClient.predictNextSlice(request);
@@ -574,14 +653,10 @@ async function segvolPrediction(
   }
 }
 
-/**
- * Mem3D-based prediction using memory network
- */
-async function mem3dPrediction(
+async function monaiPrediction(
   currentContour: number[],
   currentSlicePosition: number,
   targetSlicePosition: number,
-  historyManager?: PredictionHistoryManager,
   imageData?: {
     currentSlice?: ImageData;
     targetSlice?: ImageData;
@@ -592,129 +667,70 @@ async function mem3dPrediction(
   },
   spacing?: [number, number, number]
 ): Promise<PredictionResult> {
-  try {
-    // Validate required data
-    if (!imageData?.currentSlice || !imageData?.targetSlice) {
-      throw new Error('Mem3D requires image data for both slices');
-    }
-
-    if (!coordinateTransforms) {
-      throw new Error('Mem3D requires coordinate transforms');
-    }
-
-    if (!historyManager) {
-      throw new Error('Mem3D requires history manager for memory');
-    }
-
-    // Convert current contour from [x,y,z,...] to [[x,y],...]
-    const contour2D: number[][] = [];
-    for (let i = 0; i < currentContour.length; i += 3) {
-      const x = currentContour[i];
-      const y = currentContour[i + 1];
-      const [px, py] = coordinateTransforms.worldToPixel(x, y);
-      contour2D.push([Math.round(px), Math.round(py)]);
-    }
-
-    // Create mask from current contour
-    const currentMask = contourToMask(
-      contour2D,
-      imageData.currentSlice.rows,
-      imageData.currentSlice.columns
-    );
-
-    // Get memory slices (past segmented slices)
-    const referenceSlices: Mem3DReferenceSlice[] = [];
-    const allSnapshots = historyManager.getAllContours();
-
-    // Get up to 3 nearest slices as memory
-    const nearestSlices = allSnapshots
-      .map(snapshot => ({
-        snapshot,
-        distance: Math.abs(snapshot.slicePosition - targetSlicePosition)
-      }))
-      .sort((a, b) => a.distance - b.distance)
-      .slice(0, 3);
-
-    for (const { snapshot } of nearestSlices) {
-      // Convert contour to mask for this slice
-      const refContour2D: number[][] = [];
-      for (let i = 0; i < snapshot.contour.length; i += 3) {
-        const x = snapshot.contour[i];
-        const y = snapshot.contour[i + 1];
-        const [px, py] = coordinateTransforms.worldToPixel(x, y);
-        refContour2D.push([Math.round(px), Math.round(py)]);
-      }
-
-      const refMask = contourToMask(
-        refContour2D,
-        imageData.currentSlice.rows,
-        imageData.currentSlice.columns
-      );
-
-      // TODO: Get actual pixel data for reference slice
-      // For now, use current slice as placeholder
-      referenceSlices.push({
-        slice_data: Array.from(imageData.currentSlice.pixelData),
-        mask: refMask,
-        position: snapshot.slicePosition,
-        image_shape: [imageData.currentSlice.rows, imageData.currentSlice.columns] as [number, number]
-      });
-    }
-
-    // Add current slice to references
-    referenceSlices.push({
-      slice_data: Array.from(imageData.currentSlice.pixelData),
-      mask: currentMask,
-      position: currentSlicePosition,
-      image_shape: [imageData.currentSlice.rows, imageData.currentSlice.columns] as [number, number]
-    });
-
-    // Prepare Mem3D request
-    const request: Mem3DPredictionRequest = {
-      reference_slices: referenceSlices,
-      target_slice_data: Array.from(imageData.targetSlice.pixelData),
-      target_slice_position: targetSlicePosition,
-      image_shape: [imageData.targetSlice.rows, imageData.targetSlice.columns] as [number, number],
-      interaction_type: 'contour'
-    };
-
-    // Call Mem3D API
-    const result = await mem3dClient.predictWithMemory(request);
-
-    // Convert predicted mask back to contour
-    const predictedMask = new Uint8Array(result.predicted_mask);
-    const predictedContour = maskToContour(
-      predictedMask,
-      imageData.targetSlice.rows,
-      imageData.targetSlice.columns,
-      coordinateTransforms,
-      targetSlicePosition
-    );
-
-    return {
-      predictedContour,
-      confidence: result.confidence,
-      adjustments: {
-        scale: 1.0,
-        centerShift: { x: 0, y: 0 },
-        deformation: 0,
-      },
-      metadata: {
-        method: result.method,
-        historySize: result.memory_size,
-        qualityScore: result.quality_score,  // NEW: Quality assessment from Mem3D
-        ...result.metadata,
-      },
-    };
-  } catch (error: any) {
-    console.error('Mem3D prediction failed:', error);
-    // Return empty result on failure
+  if (!imageData?.currentSlice || !imageData?.targetSlice || !coordinateTransforms) {
+    console.warn('MONAI prediction unavailable: missing pixel data or transforms.');
     return {
       predictedContour: [],
       confidence: 0,
       adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
       metadata: {
-        method: 'mem3d_failed',
+        method: 'monai_missing_data',
+        historySize: 0,
+        notes: 'Pixel data or transforms unavailable',
+      },
+    };
+  }
+
+  try {
+    const contour2D: number[][] = [];
+    for (let i = 0; i < currentContour.length; i += 3) {
+      const [px, py] = coordinateTransforms.worldToPixel(currentContour[i], currentContour[i + 1]);
+      contour2D.push([Math.round(px), Math.round(py)]);
+    }
+
+    const request: MonaiPredictionRequest = {
+      reference_contour: contour2D,
+      reference_slice_data: Array.from(imageData.currentSlice.pixels),
+      target_slice_data: Array.from(imageData.targetSlice.pixels),
+      reference_slice_position: currentSlicePosition,
+      target_slice_position: targetSlicePosition,
+      image_shape: [
+        imageData.currentSlice.height || 512,
+        imageData.currentSlice.width || 512,
+      ],
+      spacing,
+    };
+
+    const result = await monaiClient.predict(request);
+
+    const predictedContour: number[] = [];
+    for (const [px, py] of result.predicted_contour) {
+      const [x, y] = coordinateTransforms.pixelToWorld(px, py);
+      predictedContour.push(x, y, targetSlicePosition);
+    }
+
+    return {
+      predictedContour,
+      confidence: result.confidence,
+      adjustments: {
+        scale: 1,
+        centerShift: { x: 0, y: 0 },
+        deformation: 0,
+      },
+      metadata: {
+        method: result.method,
+        historySize: 0,
+        ...result.metadata,
+      },
+    };
+  } catch (error: any) {
+    console.error('MONAI prediction failed:', error);
+    return {
+      predictedContour: [],
+      confidence: 0,
+      adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
+      metadata: {
+        method: 'monai_failed',
         historySize: 0,
         notes: error.message,
       },
@@ -722,95 +738,84 @@ async function mem3dPrediction(
   }
 }
 
-// Helper: Convert contour to binary mask
-function contourToMask(contour: number[][], rows: number, cols: number): number[] {
-  const mask = new Uint8Array(rows * cols);
-
-  if (contour.length === 0) return Array.from(mask);
-
-  // Simple scanline fill algorithm
-  for (let y = 0; y < rows; y++) {
-    const intersections: number[] = [];
-
-    // Find intersections with this scanline
-    for (let i = 0; i < contour.length; i++) {
-      const p1 = contour[i];
-      const p2 = contour[(i + 1) % contour.length];
-
-      const y1 = p1[1];
-      const y2 = p2[1];
-
-      if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
-        const x = p1[0] + (y - y1) * (p2[0] - p1[0]) / (y2 - y1);
-        intersections.push(Math.round(x));
-      }
-    }
-
-    // Sort intersections
-    intersections.sort((a, b) => a - b);
-
-    // Fill between pairs of intersections
-    for (let i = 0; i < intersections.length; i += 2) {
-      if (i + 1 < intersections.length) {
-        const x1 = Math.max(0, intersections[i]);
-        const x2 = Math.min(cols - 1, intersections[i + 1]);
-
-        for (let x = x1; x <= x2; x++) {
-          mask[y * cols + x] = 1;
-        }
-      }
-    }
-  }
-
-  return Array.from(mask);
-}
-
-// Helper: Convert binary mask to contour
-function maskToContour(
-  mask: Uint8Array,
-  rows: number,
-  cols: number,
-  coordinateTransforms: {
-    pixelToWorld: (px: number, py: number) => [number, number];
+async function mem3dPrediction(
+  currentContour: number[],
+  currentSlicePosition: number,
+  targetSlicePosition: number,
+  imageData?: {
+    currentSlice?: ImageData;
+    targetSlice?: ImageData;
   },
-  z: number
-): number[] {
-  // Find contour using marching squares algorithm (simplified)
-  const contourPixels: Array<[number, number]> = [];
+  coordinateTransforms?: {
+    worldToPixel: (x: number, y: number) => [number, number];
+    pixelToWorld: (x: number, y: number) => [number, number];
+  },
+  predictionParams?: import('./fast-slice-prediction').PredictionParams
+): Promise<PredictionResult> {
+  if (!imageData?.currentSlice || !imageData?.targetSlice || !coordinateTransforms) {
+    return {
+      predictedContour: [],
+      confidence: 0,
+      adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
+      metadata: { method: 'mem3d_missing_data', historySize: 0 },
+    };
+  }
 
-  // Find boundary pixels (pixels with at least one non-mask neighbor)
-  for (let y = 0; y < rows; y++) {
-    for (let x = 0; x < cols; x++) {
-      const idx = y * cols + x;
-
-      if (mask[idx] === 1) {
-        // Check if boundary pixel
-        const isBoundary =
-          x === 0 || x === cols - 1 || y === 0 || y === rows - 1 ||
-          mask[idx - 1] === 0 ||  // left
-          mask[idx + 1] === 0 ||  // right
-          mask[idx - cols] === 0 ||  // top
-          mask[idx + cols] === 0;  // bottom
-
-        if (isBoundary) {
-          contourPixels.push([x, y]);
-        }
-      }
+  try {
+    // Convert world contour to pixel coordinates
+    const pixelPoints: { x: number; y: number }[] = [];
+    for (let i = 0; i < currentContour.length; i += 3) {
+      const [px, py] = coordinateTransforms.worldToPixel(currentContour[i], currentContour[i + 1]);
+      pixelPoints.push({ x: px, y: py });
     }
-  }
 
-  if (contourPixels.length === 0) {
-    return [];
-  }
+    // Run fast slice prediction (client-side, <5ms)
+    const sliceDistance = targetSlicePosition - currentSlicePosition;
+    const predictedPixels = fastSlicePrediction(
+      pixelPoints,
+      imageData.currentSlice.pixels,
+      imageData.targetSlice.pixels,
+      imageData.currentSlice.width || 512,
+      imageData.currentSlice.height || 512,
+      sliceDistance,
+      predictionParams
+    );
 
-  // Convert to world coordinates
-  const contour: number[] = [];
-  for (const [px, py] of contourPixels) {
-    const [x, y] = coordinateTransforms.pixelToWorld(px, py);
-    contour.push(x, y, z);
-  }
+    if (predictedPixels.length === 0) {
+      return {
+        predictedContour: [],
+        confidence: 0,
+        adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
+        metadata: { method: 'mem3d_no_result', historySize: 0 },
+      };
+    }
 
-  return contour;
+    // Convert back to world coordinates
+    const predictedContour: number[] = [];
+    for (const p of predictedPixels) {
+      const [worldX, worldY] = coordinateTransforms.pixelToWorld(p.x, p.y);
+      predictedContour.push(worldX, worldY, targetSlicePosition);
+    }
+
+    return {
+      predictedContour,
+      confidence: 0.85,
+      adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
+      metadata: {
+        method: 'mem3d_fast_raycast',
+        historySize: 0,
+        notes: 'Ultra-fast intensity-based ray casting',
+      },
+    };
+  } catch (error: any) {
+    console.error('MEM3D fast prediction failed:', error);
+    return {
+      predictedContour: [],
+      confidence: 0,
+      adjustments: { scale: 1, centerShift: { x: 0, y: 0 }, deformation: 0 },
+      metadata: { method: 'mem3d_failed', historySize: 0, notes: error.message },
+    };
+  }
 }
 
 /**
@@ -884,52 +889,10 @@ export async function predictNextSliceContour(params: PredictionParams): Promise
       break;
     }
 
-    case 'mem3d': {
-      // AI-powered prediction using Mem3D memory network
-      // Extract spacing from image data if available
-      const spacing: [number, number, number] | undefined = imageData?.currentSlice
-        ? [
-            imageData.currentSlice.pixelSpacing?.[0] || 1.0,
-            imageData.currentSlice.pixelSpacing?.[1] || 1.0,
-            imageData.currentSlice.sliceThickness || 1.0,
-          ]
-        : undefined;
-
-      result = await mem3dPrediction(
-        currentContour,
-        currentSlicePosition,
-        targetSlicePosition,
-        historyManager,
-        imageData,
-        coordinateTransforms,
-        spacing
-      );
-
-      // If Mem3D fails, fall back to geometric prediction
-      if (result.predictedContour.length === 0 || result.confidence === 0) {
-        console.warn('Mem3D prediction failed, falling back to trend-based prediction');
-        const fallbackContour = findNearestContour();
-        result = historyManager && historyManager.size() >= 2
-          ? trendBasedPrediction(historyManager, currentSlicePosition, targetSlicePosition)
-          : adaptivePrediction(currentContour, fallbackContour, sliceDistance, targetSlicePosition);
-        if (result.metadata) {
-          result.metadata.fallbackApplied = true;
-          result.metadata.notes = 'Mem3D failed, used geometric fallback';
-        }
-      }
-      break;
-    }
-
     case 'segvol': {
       // AI-powered prediction using SegVol model
-      // Extract spacing from image data if available
-      const spacing: [number, number, number] | undefined = imageData?.currentSlice
-        ? [
-            imageData.currentSlice.pixelSpacing?.[0] || 1.0,
-            imageData.currentSlice.pixelSpacing?.[1] || 1.0,
-            imageData.currentSlice.sliceThickness || 1.0,
-          ]
-        : undefined;
+      // Use default spacing (can be passed in separately if available)
+      const spacing: [number, number, number] | undefined = params.spacing || [1.0, 1.0, 2.5];
 
       result = await segvolPrediction(
         currentContour,
@@ -953,14 +916,60 @@ export async function predictNextSliceContour(params: PredictionParams): Promise
       break;
     }
 
+    case 'monai': {
+      const spacing: [number, number, number] | undefined = params.spacing || [1.0, 1.0, 2.5];
+      result = await monaiPrediction(
+        currentContour,
+        currentSlicePosition,
+        targetSlicePosition,
+        imageData,
+        coordinateTransforms,
+        spacing
+      );
+
+      if (result.predictedContour.length === 0 || result.confidence === 0) {
+        console.warn('MONAI prediction failed, falling back to adaptive prediction');
+        const fallbackContour = findNearestContour();
+        result = adaptivePrediction(currentContour, fallbackContour, sliceDistance, targetSlicePosition);
+        if (result.metadata) {
+          result.metadata.fallbackApplied = true;
+          result.metadata.notes = 'MONAI failed, used geometric fallback';
+        }
+      }
+      break;
+    }
+
+    case 'mem3d': {
+      result = await mem3dPrediction(
+        currentContour,
+        currentSlicePosition,
+        targetSlicePosition,
+        imageData,
+        coordinateTransforms,
+        params.mem3dParams
+      );
+
+      if (result.predictedContour.length === 0 || result.confidence === 0) {
+        console.warn('MEM3D prediction failed, falling back to adaptive prediction');
+        const fallbackContour = findNearestContour();
+        result = adaptivePrediction(currentContour, fallbackContour, sliceDistance, targetSlicePosition);
+        if (result.metadata) {
+          result.metadata.fallbackApplied = true;
+          result.metadata.notes = 'MEM3D failed, used geometric fallback';
+        }
+      }
+      break;
+    }
+
     default:
       result = simplePrediction(currentContour, sliceDistance, targetSlicePosition, anatomicalRegion);
   }
   
   // Apply image-aware refinement if enabled and image data available
-  // Skip refinement for AI modes (segvol, mem3d) as they handle this internally
+  // Skip refinement for AI modes (they handle refinement internally)
   if (enableImageRefinement &&
       predictionMode !== 'segvol' &&
+      predictionMode !== 'monai' &&
       predictionMode !== 'mem3d' &&
       imageData?.targetSlice &&
       coordinateTransforms &&
@@ -1026,12 +1035,12 @@ export async function predictNextSliceContour(params: PredictionParams): Promise
 /**
  * Predict contours for multiple adjacent slices based on propagation mode
  */
-export function predictMultipleSlices(
+export async function predictMultipleSlices(
   currentContour: number[],
   currentSlicePosition: number,
   mode: PropagationMode = 'moderate',
   params: Partial<PredictionParams> = {}
-): Map<number, PredictionResult> {
+): Promise<Map<number, PredictionResult>> {
   const predictions = new Map<number, PredictionResult>();
   
   // Determine target slices based on mode
@@ -1059,7 +1068,7 @@ export function predictMultipleSlices(
   for (const offset of targetOffsets) {
     const targetPosition = currentSlicePosition + offset;
     
-    const prediction = predictNextSliceContour({
+    const prediction = await predictNextSliceContour({
       currentContour,
       currentSlicePosition,
       targetSlicePosition: targetPosition,

@@ -11,6 +11,8 @@ export interface SegVolPredictionRequest {
   target_slice_position: number;
   image_shape: [number, number];
   spacing?: [number, number, number];
+  volume_slices?: number[][];  // Optional: All available DICOM slices (N × H×W flattened)
+  volume_positions?: number[];  // Optional: Z positions for each slice
 }
 
 export interface SegVolPredictionResult {

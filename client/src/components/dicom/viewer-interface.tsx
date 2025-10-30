@@ -666,14 +666,63 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const seriesWithImages = await response.json();
       setSelectedSeries(seriesWithImages);
       
-      // Apply default window/level if available from first image
+      // Apply default window/level based on modality and series description
       if (seriesWithImages.images?.length > 0) {
-        const firstImage = seriesWithImages.images[0];
-        if (firstImage.windowCenter && firstImage.windowWidth) {
-          setWindowLevel({
-            level: parseFloat(firstImage.windowCenter),
-            window: parseFloat(firstImage.windowWidth)
-          });
+        const modality = (seriesWithImages.modality || '').toUpperCase();
+        const description = (seriesWithImages.seriesDescription || '').toLowerCase();
+        
+        let autoWindowLevel: WindowLevel | null = null;
+        
+        // Smart MRI window/level detection
+        if (modality === 'MR') {
+          console.log(`🧠 Detecting MRI window/level for series: "${description}"`);
+          
+          // Detect sequence type from description
+          if (description.includes('t1') && !description.includes('t2')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri brain t1'];
+            console.log('📊 Applied T1 MRI preset');
+          } else if (description.includes('t2') && !description.includes('flair')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri brain t2'];
+            console.log('📊 Applied T2 MRI preset');
+          } else if (description.includes('flair')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri brain flair'];
+            console.log('📊 Applied FLAIR MRI preset');
+          } else if (description.includes('spine')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri spine'];
+            console.log('📊 Applied Spine MRI preset');
+          } else {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri auto'];
+            console.log('📊 Applied default MRI preset');
+          }
+        }
+        // CT uses DICOM window/level or defaults
+        else if (modality === 'CT') {
+          const firstImage = seriesWithImages.images[0];
+          if (firstImage.windowCenter && firstImage.windowWidth) {
+            autoWindowLevel = {
+              level: parseFloat(firstImage.windowCenter),
+              window: parseFloat(firstImage.windowWidth)
+            };
+            console.log('📊 Applied CT DICOM window/level');
+          } else {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['soft tissue'];
+            console.log('📊 Applied CT default preset');
+          }
+        }
+        // Other modalities
+        else {
+          const firstImage = seriesWithImages.images[0];
+          if (firstImage.windowCenter && firstImage.windowWidth) {
+            autoWindowLevel = {
+              level: parseFloat(firstImage.windowCenter),
+              window: parseFloat(firstImage.windowWidth)
+            };
+            console.log(`📊 Applied ${modality} DICOM window/level`);
+          }
+        }
+        
+        if (autoWindowLevel) {
+          setWindowLevel(autoWindowLevel);
         }
       }
       
@@ -1600,17 +1649,22 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
 
   const handleContourUpdate = (payload: any) => {
     console.log('Contour update received:', payload);
+    console.log('Payload type:', typeof payload);
+    console.log('Payload.action:', payload?.action);
+    console.log('Payload has action?', !!payload?.action);
     
     // Check if this is an action payload from ContourEditToolbar or full structures from WorkingViewer
     if (payload && payload.action) {
       // This is an action payload from ContourEditToolbar
       // Pass it directly to WorkingViewer's handleContourUpdate
-      console.log(`Received action: ${payload.action} for structure ${payload.structureId}`);
+      console.log(`✓ Received action: ${payload.action} for structure ${payload.structureId}`);
       if (workingViewerRef.current && workingViewerRef.current.handleContourUpdate) {
         workingViewerRef.current.handleContourUpdate(payload);
       }
       return;
     }
+    
+    console.log('⚠️ Payload has no action field, treating as RT structures');
     
     // This is the full updated RT structures from WorkingViewer after processing
     if (payload && payload.structures) {
@@ -2084,6 +2138,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           onMPRToggle={() => setMprVisible(!mprVisible)}
           isMPRActive={mprVisible}
+          onFusionToggle={() => setShowFusionPanel(!showFusionPanel)}
+          isFusionActive={showFusionPanel}
           isPanActive={activeToolMode === 'pan'}
           isCrosshairsActive={activeToolMode === 'crosshairs'}
           isMeasureActive={activeToolMode === 'measure'}
@@ -2182,6 +2238,7 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
             setShowMarginToolbar(true);
           }}
           activePredictions={activePredictions}
+          canvasRef={workingViewerRef.current?.canvasRef}
         />
       )}
 

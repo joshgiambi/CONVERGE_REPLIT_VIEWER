@@ -29,7 +29,9 @@ import { FuseboxVolumeResampler } from './fusion/resampler.ts';
 import { loadDicomMetadata } from './fusion/dicom-metadata.ts';
 import segvolRouter from './segvol-api';
 import mem3dRouter from './mem3d-api';
+import monaiRouter from './monai-api';
 import nninteractiveRouter from './nninteractive-api';
+import supersegRouter from './superseg-api';
 const isDev = process.env.NODE_ENV !== 'production';
 
 // Helper function to check if two polygons overlap
@@ -3590,9 +3592,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/fusion/manifest", async (req: Request, res: Response) => {
     try {
+      logger.info(`🔍 Fusion manifest request received: ${JSON.stringify(req.query)}`);
+      
       const primarySeriesId = Number(req.query.primarySeriesId);
       if (!Number.isFinite(primarySeriesId)) {
-        return res.status(400).json({ error: 'primarySeriesId is required' });
+        logger.error(`❌ Invalid primarySeriesId: ${req.query.primarySeriesId}`);
+        return res.status(400).json({ error: 'primarySeriesId is required', received: req.query });
       }
 
       const parseIds = (input: unknown): number[] => {
@@ -3620,6 +3625,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const interpolation = interpolationParam === 'nearest' ? 'nearest' : interpolationParam === 'linear' ? 'linear' : undefined;
       const preload = typeof req.query.preload === 'string' ? ['1', 'true', 'yes'].includes(req.query.preload.toLowerCase()) : undefined;
 
+      logger.info(`📋 Fusion manifest request: primary=${primarySeriesId}, secondaries=${secondarySeriesIds.join(',')}`);
+
       const manifest = await fusionManifestService.getManifest({
         primarySeriesId,
         secondarySeriesIds,
@@ -3629,11 +3636,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         logger: fuseboxEmit,
       });
 
+      logger.info(`✅ Fusion manifest ready: ${manifest.secondaries.length} secondaries`);
       res.setHeader('Cache-Control', 'no-store');
       res.json(manifest);
     } catch (err: any) {
-      logger.error(`fusion manifest failed: ${err?.message || String(err)}`);
-      res.status(500).json({ error: 'fusion-manifest failed', details: err?.message || String(err) });
+      logger.error(`❌ Fusion manifest failed: ${err?.message || String(err)}`, err?.stack);
+      // Always return JSON, never let Express send HTML error page
+      res.status(500).json({ 
+        error: 'fusion-manifest failed', 
+        details: err?.message || String(err),
+        stack: isDev ? err?.stack : undefined
+      });
     }
   });
 
@@ -6119,11 +6132,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Register SegVol API routes
   app.use('/api', segvolRouter);
 
+  // Register MONAI API routes
+  app.use('/api', monaiRouter);
+
   // Register Mem3D API routes
   app.use('/api', mem3dRouter);
 
   // Register nnInteractive API routes
   app.use('/api/nninteractive', nninteractiveRouter);
+
+  // Register SuperSeg API routes
+  app.use('/api/superseg', supersegRouter);
 
   return { close: () => {} } as Server;
 }

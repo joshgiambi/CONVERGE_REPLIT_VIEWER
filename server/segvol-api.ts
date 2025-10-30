@@ -9,7 +9,7 @@ import fetch from 'node-fetch';
 const router = Router();
 
 // SegVol service configuration
-const SEGVOL_SERVICE_URL = process.env.SEGVOL_SERVICE_URL || 'http://127.0.0.1:5001';
+const SEGVOL_SERVICE_URL = process.env.SEGVOL_SERVICE_URL || 'http://127.0.0.1:5002';
 const SEGVOL_TIMEOUT = parseInt(process.env.SEGVOL_TIMEOUT || '30000'); // 30 seconds
 
 interface SegVolPredictionRequest {

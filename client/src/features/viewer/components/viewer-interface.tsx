@@ -696,14 +696,63 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
       const seriesWithImages = await response.json();
       setSelectedSeries(seriesWithImages);
       
-      // Apply default window/level if available from first image
+      // Apply default window/level based on modality and series description
       if (seriesWithImages.images?.length > 0) {
-        const firstImage = seriesWithImages.images[0];
-        if (firstImage.windowCenter && firstImage.windowWidth) {
-          setWindowLevel({
-            level: parseFloat(firstImage.windowCenter),
-            window: parseFloat(firstImage.windowWidth)
-          });
+        const modality = (seriesWithImages.modality || '').toUpperCase();
+        const description = (seriesWithImages.seriesDescription || '').toLowerCase();
+        
+        let autoWindowLevel: WindowLevel | null = null;
+        
+        // Smart MRI window/level detection
+        if (modality === 'MR') {
+          console.log(`🧠 Detecting MRI window/level for series: "${description}"`);
+          
+          // Detect sequence type from description
+          if (description.includes('t1') && !description.includes('t2')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri brain t1'];
+            console.log('📊 Applied T1 MRI preset');
+          } else if (description.includes('t2') && !description.includes('flair')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri brain t2'];
+            console.log('📊 Applied T2 MRI preset');
+          } else if (description.includes('flair')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri brain flair'];
+            console.log('📊 Applied FLAIR MRI preset');
+          } else if (description.includes('spine')) {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri spine'];
+            console.log('📊 Applied Spine MRI preset');
+          } else {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['mri auto'];
+            console.log('📊 Applied default MRI preset');
+          }
+        }
+        // CT uses DICOM window/level or defaults
+        else if (modality === 'CT') {
+          const firstImage = seriesWithImages.images[0];
+          if (firstImage.windowCenter && firstImage.windowWidth) {
+            autoWindowLevel = {
+              level: parseFloat(firstImage.windowCenter),
+              window: parseFloat(firstImage.windowWidth)
+            };
+            console.log('📊 Applied CT DICOM window/level');
+          } else {
+            autoWindowLevel = WINDOW_LEVEL_PRESETS['soft tissue'];
+            console.log('📊 Applied CT default preset');
+          }
+        }
+        // Other modalities
+        else {
+          const firstImage = seriesWithImages.images[0];
+          if (firstImage.windowCenter && firstImage.windowWidth) {
+            autoWindowLevel = {
+              level: parseFloat(firstImage.windowCenter),
+              window: parseFloat(firstImage.windowWidth)
+            };
+            console.log(`📊 Applied ${modality} DICOM window/level`);
+          }
+        }
+        
+        if (autoWindowLevel) {
+          setWindowLevel(autoWindowLevel);
         }
       }
       
@@ -2074,6 +2123,8 @@ export function ViewerInterface({ studyData, onContourSettingsChange, contourSet
           }}
           onMPRToggle={() => setMprVisible(!mprVisible)}
           isMPRActive={mprVisible}
+          onFusionToggle={() => setShowFusionPanel(!showFusionPanel)}
+          isFusionActive={showFusionPanel}
           isPanActive={activeToolMode === 'pan'}
           isCrosshairsActive={activeToolMode === 'crosshairs'}
           isMeasureActive={activeToolMode === 'measure'}

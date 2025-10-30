@@ -4,7 +4,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
-    "dev": "npm run dev:setup && NODE_ENV=development tsx watch server/index.ts",
+    "dev": "node scripts/ensure-monai.js && node scripts/ensure-segvol.js && npm run dev:setup && NODE_ENV=development tsx watch server/index.ts",
     "dev:itk": "npm run dev:setup && DICOM_REG_CONVERTER=/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/build/dicom-reg-converter/dicom_reg_to_h5 FUSEBOX_PYTHON=/Users/joshua/Documents/CONVERGE_REPLIT_VIEWER/sam_env/bin/python PORT=3000 NODE_ENV=development tsx watch server/index.ts",
     "dev:replit": "npm run dev:setup:replit && NODE_ENV=development tsx watch server/index.ts",
     "dev:setup": "node -e \"console.log('🔧 Checking Fusebox setup...'); const fs = require('fs'); const path = require('path'); const helperPath = path.join(__dirname, 'build/dicom-reg-converter/dicom_reg_to_h5'); const pythonPath = path.join(__dirname, 'sam_env/bin/python'); if (!fs.existsSync(helperPath)) { console.error('❌ DICOM helper not found at:', helperPath); console.error('Run: cmake --build build/dicom-reg-converter'); process.exit(1); } if (!fs.existsSync(pythonPath)) { console.error('❌ Python venv not found at:', pythonPath); console.error('Run: python -m venv sam_env && source sam_env/bin/activate && pip install -e .'); process.exit(1); } console.log('✅ Fusebox setup verified'); console.log('🐟 DICOM helper:', helperPath); console.log('🐍 Python interpreter:', pythonPath);\"",
@@ -63,6 +63,8 @@
     "@uppy/file-input": "^4.2.2",
     "@uppy/progress-bar": "^4.3.2",
     "@uppy/react": "^4.5.2",
+    "archiver": "^7.0.1",
+    "axios": "^1.12.2",
     "bull": "^4.16.5",
     "canvas": "^3.1.2",
     "class-variance-authority": "^0.7.1",
@@ -98,6 +100,7 @@
     "multer": "^2.0.1",
     "nanoid": "^5.1.5",
     "next-themes": "^0.4.6",
+    "pako": "^2.1.0",
     "passport": "^0.7.0",
     "passport-local": "^1.0.0",
     "pg": "^8.16.3",
@@ -120,8 +123,7 @@
     "ws": "^8.18.0",
     "yauzl": "^3.2.0",
     "zod": "^3.24.2",
-    "zod-validation-error": "^3.4.0",
-    "archiver": "^7.0.1"
+    "zod-validation-error": "^3.4.0"
   },
   "devDependencies": {
     "@replit/vite-plugin-cartographer": "^0.2.7",

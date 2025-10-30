@@ -2649,8 +2649,8 @@ export function SeriesSelector({
         </CardContent>
       </Card>
 
-      {/* Window/Level Controls - Separate collapsible panel */}
-      <Card className="bg-gray-950/90 backdrop-blur-xl border border-orange-500/30 rounded-xl overflow-hidden shadow-2xl shadow-black/50">
+      {/* Window/Level Controls - Redesigned */}
+      <Card className="bg-gray-950/90 backdrop-blur-xl border border-gray-700/50 rounded-xl overflow-hidden shadow-xl">
         <CardContent className="p-0">
           <Accordion 
             type="single" 
@@ -2661,18 +2661,25 @@ export function SeriesSelector({
             }}
           >
             <AccordionItem value="window-level" className="border-gray-800/50">
-              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-orange-500/10 backdrop-blur-sm">
-                <div className="flex items-center text-gray-100 font-medium text-sm">
-                  <Settings className="w-4 h-4 mr-2 text-orange-400" />
-                  Window/Level
+              <AccordionTrigger className="px-4 py-3 hover:no-underline hover:bg-white/5">
+                <div className="flex items-center gap-2 text-gray-200 font-medium text-sm">
+                  <Settings className="w-4 h-4 text-gray-400" />
+                  <span>Window/Level</span>
+                  <span className="text-xs text-gray-500 font-normal ml-auto">
+                    {Math.round(windowLevel.window)}/{Math.round(windowLevel.level)}
+                  </span>
                 </div>
               </AccordionTrigger>
-              <AccordionContent className="px-3 pb-3">
-                <div className="space-y-3">
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">
-                      Window Width: {windowLevel.window}
-                    </label>
+              <AccordionContent className="px-4 pb-4 pt-2">
+                <div className="space-y-4">
+                  {/* Window Width */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-gray-300">Window Width</label>
+                      <span className="text-xs font-semibold text-white bg-gray-800/50 px-2 py-0.5 rounded">
+                        {Math.round(windowLevel.window)}
+                      </span>
+                    </div>
                     <Slider
                       value={[windowLevel.window]}
                       onValueChange={handleWindowChange}
@@ -2683,10 +2690,14 @@ export function SeriesSelector({
                     />
                   </div>
                   
-                  <div>
-                    <label className="text-xs text-gray-400 block mb-1">
-                      Window Level: {windowLevel.level}
-                    </label>
+                  {/* Window Level */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-xs font-medium text-gray-300">Window Level</label>
+                      <span className="text-xs font-semibold text-white bg-gray-800/50 px-2 py-0.5 rounded">
+                        {Math.round(windowLevel.level)}
+                      </span>
+                    </div>
                     <Slider
                       value={[windowLevel.level]}
                       onValueChange={handleLevelChange}
@@ -2698,21 +2709,53 @@ export function SeriesSelector({
                   </div>
                 </div>
                 
-                {/* Preset Buttons */}
-                <div className="mt-3">
-                  <h5 className="text-xs text-gray-400 mb-2">Presets</h5>
-                  <div className="grid grid-cols-2 gap-1">
-                    {Object.entries(WINDOW_LEVEL_PRESETS).map(([name, preset]) => (
-                      <Button
-                        key={name}
-                        variant="outline"
-                        size="sm"
-                        className="text-xs py-1 px-2 h-auto bg-orange-500/10 border border-orange-500/30 text-orange-400 hover:bg-orange-500/20 hover:text-orange-300 backdrop-blur-sm transition-all duration-200"
-                        onClick={() => applyPreset(preset as WindowLevel)}
-                      >
-                        {name.charAt(0).toUpperCase() + name.slice(1)}
-                      </Button>
-                    ))}
+                {/* Preset Buttons - Cleaner grid */}
+                <div className="mt-4 pt-4 border-t border-gray-800/50">
+                  <h5 className="text-xs font-medium text-gray-400 mb-2.5 uppercase tracking-wide">Presets</h5>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    {(() => {
+                      const modality = (selectedSeries?.modality || '').toUpperCase();
+                      
+                      // Filter presets based on modality
+                      const filteredPresets = Object.entries(WINDOW_LEVEL_PRESETS).filter(([name]) => {
+                        const presetName = name.toLowerCase();
+                        
+                        // MRI presets
+                        if (modality === 'MR') {
+                          return presetName.includes('mri') || presetName === 'brain';
+                        }
+                        // CT presets
+                        else if (modality === 'CT') {
+                          return !presetName.includes('mri') && presetName !== 'full range';
+                        }
+                        // PET/PT - show full range
+                        else if (modality === 'PT' || modality === 'PET') {
+                          return presetName === 'full range';
+                        }
+                        // Default - show common presets
+                        return !presetName.includes('mri');
+                      });
+                      
+                      return filteredPresets.map(([name, preset]) => {
+                        const isActive = Math.abs(windowLevel.window - preset.window) < 1 && 
+                                       Math.abs(windowLevel.level - preset.level) < 1;
+                        return (
+                          <Button
+                            key={name}
+                            variant="outline"
+                            size="sm"
+                            className={`text-xs py-1.5 px-2 h-auto transition-all ${
+                              isActive 
+                                ? 'bg-blue-600/20 border-blue-500/50 text-blue-300' 
+                                : 'bg-gray-800/30 border-gray-700/50 text-gray-300 hover:bg-gray-700/40 hover:text-white hover:border-gray-600/50'
+                            }`}
+                            onClick={() => applyPreset(preset as WindowLevel)}
+                          >
+                            {name.charAt(0).toUpperCase() + name.slice(1).replace(/\b\w/g, l => l.toUpperCase())}
+                          </Button>
+                        );
+                      });
+                    })()}
                   </div>
                 </div>
               </AccordionContent>

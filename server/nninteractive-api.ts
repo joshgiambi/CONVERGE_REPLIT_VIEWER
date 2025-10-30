@@ -1,8 +1,8 @@
 /**
  * nnInteractive API Routes
  *
- * Express middleware for interactive 3D tumor segmentation using nnInteractive.
- * Proxies requests between frontend and Python nnInteractive service.
+ * Express middleware for interactive 3D tumor segmentation.
+ * Now proxies requests to SegVol service for medical-specific volumetric segmentation.
  */
 
 import { Router, Request, Response } from 'express';
@@ -10,8 +10,8 @@ import axios, { AxiosError } from 'axios';
 
 const router = Router();
 
-// Configuration
-const NNINTERACTIVE_SERVICE_URL = process.env.NNINTERACTIVE_SERVICE_URL || 'http://127.0.0.1:5003';
+// Configuration - Now using SegVol service on port 8001
+const NNINTERACTIVE_SERVICE_URL = process.env.NNINTERACTIVE_SERVICE_URL || 'http://127.0.0.1:8001';
 const REQUEST_TIMEOUT = parseInt(process.env.NNINTERACTIVE_TIMEOUT || '60000', 10);
 
 // Axios instance with timeout
@@ -27,21 +27,24 @@ const nninteractiveClient = axios.create({
  * Health check endpoint
  * GET /api/nninteractive/health
  */
-router.get('/health', async (req: Request, res: Response) => {
+router.get('/health', async (_req: Request, res: Response) => {
   try {
     const response = await nninteractiveClient.get('/health', { timeout: 5000 });
 
+    // SegVol service returns: {status: "healthy", model_loaded: true, device: "cpu"}
+    const isHealthy = response.data.status === 'healthy' && response.data.model_loaded === true;
+
     res.json({
       status: 'healthy',
-      nninteractive_available: response.data.nninteractive_available || false,
+      nninteractive_available: isHealthy,
       device: response.data.device || 'unknown',
-      mock_mode: response.data.mock_mode || false,
+      mock_mode: false,  // SegVol is real medical AI model
       service_url: NNINTERACTIVE_SERVICE_URL
     });
   } catch (error) {
     const axiosError = error as AxiosError;
 
-    console.error('nnInteractive health check failed:', axiosError.message);
+    console.error('SegVol health check failed:', axiosError.message);
 
     res.status(503).json({
       status: 'unavailable',
@@ -108,9 +111,9 @@ router.post('/segment', async (req: Request, res: Response) => {
       });
     }
 
-    console.log(`nnInteractive segmentation request: volume shape=[${volume.length},${volume[0]?.length},${volume[0]?.[0]?.length}], scribbles=${scribbles.length}`);
+    console.log(`SegVol tumor segmentation request: volume shape=[${volume.length},${volume[0]?.length},${volume[0]?.[0]?.length}], scribbles=${scribbles.length}`);
 
-    // Forward to Python service
+    // Forward to SegVol Python service
     const startTime = Date.now();
     const response = await nninteractiveClient.post('/segment', {
       volume,
@@ -121,7 +124,7 @@ router.post('/segment', async (req: Request, res: Response) => {
     });
 
     const elapsed = Date.now() - startTime;
-    console.log(`nnInteractive segmentation complete: ${elapsed}ms, confidence=${response.data.confidence}`);
+    console.log(`SegVol tumor segmentation complete: ${elapsed}ms, confidence=${response.data.confidence}`);
 
     res.json({
       mask: response.data.mask,
@@ -133,11 +136,11 @@ router.post('/segment', async (req: Request, res: Response) => {
   } catch (error) {
     const axiosError = error as AxiosError;
 
-    console.error('nnInteractive segmentation failed:', axiosError.message);
+    console.error('SegVol tumor segmentation failed:', axiosError.message);
     console.error('Response data:', axiosError.response?.data);
 
     res.status(500).json({
-      error: 'Segmentation failed',
+      error: 'Tumor segmentation failed',
       details: axiosError.response?.data || axiosError.message
     });
   }

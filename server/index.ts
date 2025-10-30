@@ -9,8 +9,9 @@ import net from "node:net";
 const app = express();
 const server = createServer(app);
 
-// Add JSON parsing middleware with increased limit for RT structure contours
-app.use(express.json({ limit: '50mb' }));
+// Add JSON parsing middleware with generous limit to support SegVol payloads
+// SegVol requests can include large per-slice arrays and optional volume context
+app.use(express.json({ limit: '500mb' }));
 
 async function startServer() {
   // Setup routes first

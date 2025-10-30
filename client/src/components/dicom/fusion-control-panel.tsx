@@ -51,14 +51,15 @@ export function FusionControlPanel({
     const modality = (activeDescriptor?.secondaryModality || '').toUpperCase();
     const presetsByModality: Record<string, Array<{ label: string; window: number; level: number }>> = {
       MR: [
-        { label: 'Brain', window: 80, level: 40 },
-        { label: 'Spine', window: 250, level: 50 },
-        { label: 'T2 Tissue', window: 160, level: 80 },
+        { label: 'T1', window: 600, level: 300 },
+        { label: 'T2', window: 2000, level: 1000 },
+        { label: 'FLAIR', window: 1800, level: 900 },
+        { label: 'Spine', window: 1200, level: 600 },
       ],
       CT: [
         { label: 'Soft Tissue', window: 400, level: 40 },
         { label: 'Lung', window: 1500, level: -600 },
-        { label: 'Bone', window: 2000, level: 300 },
+        { label: 'Bone', window: 1800, level: 400 },
       ],
       // PT/PET: Use Auto (manifest) settings only
       PT: [],

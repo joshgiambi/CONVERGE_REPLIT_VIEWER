@@ -35,6 +35,7 @@ interface RTStructureOverlayProps {
   onPredictionConfirm?: (structureId: number, slicePosition: number) => void;
   animationTime?: number;
   rtStructures?: any; // Pass in RT structures for better control
+  imageMetadata?: any; // DICOM metadata for coordinate transformation
 }
 
 export function RTStructureOverlay({
@@ -50,7 +51,8 @@ export function RTStructureOverlay({
   contourOpacity = 30,
   onPredictionConfirm,
   animationTime,
-  rtStructures: externalRTStructures
+  rtStructures: externalRTStructures,
+  imageMetadata
 }: RTStructureOverlayProps) {
   const [localRTStructures, setLocalRTStructures] = useState<RTStructureSet | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -155,9 +157,9 @@ export function RTStructureOverlay({
     if (!ctx) return;
 
     // Clear any existing overlays (we'll redraw them) - pass animation time for dashed borders
-    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime);
+    renderRTStructures(ctx, canvas, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime, imageMetadata);
 
-  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime]);
+  }, [canvasRef, rtStructures, currentSlicePosition, imageWidth, imageHeight, zoom, panX, panY, contourWidth, contourOpacity, animationTime, imageMetadata]);
 
   return null; // This component only draws on the existing canvas
 }
@@ -174,7 +176,8 @@ function renderRTStructures(
   panY: number,
   contourWidth: number = 2,
   contourOpacity: number = 80,
-  animationTime?: number // For animated dashed borders
+  animationTime?: number, // For animated dashed borders
+  imageMetadata?: any // DICOM metadata for coordinate transformation
 ) {
   // Save current context state
   ctx.save();
@@ -226,7 +229,7 @@ function renderRTStructures(
       
       // Only draw if on exactly the same slice (with tiny tolerance for rounding)
       if (Math.abs(contourSliceMicrons - currentSliceMicrons) <= toleranceMicrons) {
-        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity, animationTime);
+        drawContour(ctx, contour, canvas.width, canvas.height, imageWidth, imageHeight, contourWidth, contourOpacity, animationTime, imageMetadata);
       }
     });
   });
@@ -269,15 +272,33 @@ function drawContour(
   imageHeight: number,
   contourWidth: number = 2,
   contourOpacity: number = 80,
-  animationTime?: number
+  animationTime?: number,
+  imageMetadata?: any
 ) {
   if (contour.points.length < 6) return;
 
-  // Use authentic DICOM metadata values
-  const imagePositionPatient: [number, number, number] = [-300, -300, 35];
-  const pixelSpacing: [number, number] = [1.171875, 1.171875];
-  const dicomImageWidth = 512; // Standard DICOM matrix size
-  const dicomImageHeight = 512;
+  // Parse DICOM metadata - use real values from current image
+  const imagePositionPatient: [number, number, number] = imageMetadata?.imagePosition
+    ? (typeof imageMetadata.imagePosition === 'string'
+        ? imageMetadata.imagePosition.split("\\").map(Number)
+        : imageMetadata.imagePosition)
+    : [0, 0, 0];
+
+  const pixelSpacing: [number, number] = imageMetadata?.pixelSpacing
+    ? (typeof imageMetadata.pixelSpacing === 'string'
+        ? imageMetadata.pixelSpacing.split("\\").map(Number)
+        : imageMetadata.pixelSpacing)
+    : [1, 1];
+
+  const imageOrientation = imageMetadata?.imageOrientation
+    ? (typeof imageMetadata.imageOrientation === 'string'
+        ? imageMetadata.imageOrientation.split("\\").map(Number)
+        : imageMetadata.imageOrientation)
+    : [1, 0, 0, 0, 1, 0]; // Default to axial orientation
+
+  // Use actual image dimensions from the parent component
+  const dicomImageWidth = imageWidth;
+  const dicomImageHeight = imageHeight;
 
   // Apply global contour width and opacity settings
   ctx.lineWidth = contourWidth;
@@ -302,20 +323,34 @@ function drawContour(
 
   ctx.beginPath();
 
+  // Extract image orientation vectors (row and column direction cosines)
+  const rowCosines = [imageOrientation[0], imageOrientation[1], imageOrientation[2]];
+  const colCosines = [imageOrientation[3], imageOrientation[4], imageOrientation[5]];
+
+  // Helper function for dot product
+  const dot = (a: number[], b: number[]) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
   for (let i = 0; i < contour.points.length; i += 3) {
     const worldX = contour.points[i];
     const worldY = contour.points[i + 1];
+    const worldZ = contour.points[i + 2];
 
-    const [canvasX, canvasY] = worldToCanvas(
-      worldX,
-      worldY,
-      imagePositionPatient,
-      pixelSpacing,
-      canvasWidth,
-      canvasHeight,
-      dicomImageWidth,
-      dicomImageHeight
-    );
+    // Relative position from image origin
+    const rel = [
+      worldX - imagePositionPatient[0],
+      worldY - imagePositionPatient[1],
+      worldZ - imagePositionPatient[2],
+    ];
+
+    // Project onto image plane using orientation vectors
+    // DICOM standard: rowCosines = X direction, colCosines = Y direction
+    // pixelSpacing[0] = row spacing (Y), pixelSpacing[1] = column spacing (X)
+    const pixelX = dot(rel, rowCosines) / pixelSpacing[1];  // X = row direction / column spacing
+    const pixelY = dot(rel, colCosines) / pixelSpacing[0];  // Y = column direction / row spacing
+
+    // Convert pixel coordinates to canvas coordinates
+    const canvasX = (pixelX / dicomImageWidth) * canvasWidth;
+    const canvasY = (pixelY / dicomImageHeight) * canvasHeight;
 
     if (i === 0) {
       ctx.moveTo(canvasX, canvasY);

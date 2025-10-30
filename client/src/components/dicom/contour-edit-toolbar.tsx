@@ -40,7 +40,8 @@ import {
   Keyboard,
   SplitSquareHorizontal,
   Info,
-  Brain
+  MousePointer2,
+  Loader2
 } from 'lucide-react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { undoRedoManager } from '@/lib/undo-system';
@@ -50,7 +51,8 @@ import { useToast } from '@/hooks/use-toast';
 import { SmartNthSettingsDialog } from './smart-nth-settings-dialog';
 import { Checkbox } from '@/components/ui/checkbox';
 import { segvolClient } from '@/lib/segvol-client';
-import { mem3dClient } from '@/lib/mem3d-client';
+import { monaiClient } from '@/lib/monai-client';
+import { PredictionTuningPanel, DEFAULT_PARAMS, type PredictionParams as TuningParams } from './prediction-tuning-panel';
 
 interface ContourEditToolbarProps {
   selectedStructure: {
@@ -68,7 +70,9 @@ interface ContourEditToolbarProps {
     isActive: boolean;
     predictionEnabled?: boolean;
     smartBrushEnabled?: boolean;
-    predictionMode?: 'fast' | 'balanced' | 'mem3d' | 'segvol' | 'smart';
+    predictionMode?: 'fast' | 'balanced' | 'segvol' | 'monai' | 'mem3d';
+    mem3dParams?: TuningParams;
+    aiTumorSmoothOutput?: boolean;
   }) => void;
   currentSlicePosition?: number;
   onContourUpdate?: (updatedStructures: any) => void;
@@ -90,6 +94,7 @@ interface ContourEditToolbarProps {
   activePredictions?: Map<number, any>;
   propagationMode?: 'conservative' | 'moderate' | 'aggressive';
   onPropagationModeChange?: (mode: 'conservative' | 'moderate' | 'aggressive') => void;
+  canvasRef?: React.RefObject<HTMLCanvasElement>; // For dispatching events to AITumorTool
 }
 
 export function ContourEditToolbar({ 
@@ -109,7 +114,8 @@ export function ContourEditToolbar({
   onOpenAdvancedMarginTool,
   activePredictions,
   propagationMode = 'moderate',
-  onPropagationModeChange
+  onPropagationModeChange,
+  canvasRef
 }: ContourEditToolbarProps) {
   const [activeTool, setActiveTool] = useState<string | null>(null);
   const [brushThickness, setBrushThickness] = useState([9]); // ~1cm at 1.171875mm pixel spacing
@@ -125,9 +131,11 @@ export function ContourEditToolbar({
   const [booleanOperation, setBooleanOperation] = useState<'combine' | 'subtract'>('combine');
   const [targetStructure, setTargetStructure] = useState<number | null>(null);
   const [isPredictionEnabled, setIsPredictionEnabled] = useState(false); // Next slice prediction toggle
-  const [predictionMode, setPredictionMode] = useState<'fast' | 'balanced' | 'mem3d' | 'segvol' | 'smart'>('balanced'); // Prediction algorithm mode
+  const [predictionMode, setPredictionMode] = useState<'fast' | 'balanced' | 'segvol' | 'monai' | 'mem3d'>('mem3d'); // Prediction algorithm mode
+  const [mem3dParams, setMem3dParams] = useState<TuningParams>(DEFAULT_PARAMS); // MEM3D tuning parameters
   const [segvolAvailable, setSegvolAvailable] = useState<boolean | null>(null); // SegVol service availability
-  const [mem3dAvailable, setMem3dAvailable] = useState<boolean | null>(null); // Mem3D service availability
+  const [monaiAvailable, setMonaiAvailable] = useState<boolean | null>(null); // MONAI service availability
+  const [aiTumorSmoothOutput, setAiTumorSmoothOutput] = useState(false); // AI tumor tool smoothing option
   const [showNthSliceMenu, setShowNthSliceMenu] = useState(false);
   const [showClearMenu, setShowClearMenu] = useState(false);
   const [showBlobMenu, setShowBlobMenu] = useState(false);
@@ -172,27 +180,19 @@ export function ContourEditToolbar({
     let cancelled = false;
 
     const checkServices = async () => {
-      // Check SegVol
       try {
-        const segvolHealth = await segvolClient.checkHealth();
+        const [segvolHealth, monaiHealth] = await Promise.all([
+          segvolClient.checkHealth(),
+          monaiClient.checkHealth(),
+        ]);
         if (!cancelled) {
           setSegvolAvailable(segvolHealth.segvol_available);
+          setMonaiAvailable(monaiHealth.monai_available ?? (monaiHealth.status === 'ok'));
         }
       } catch (error) {
         if (!cancelled) {
           setSegvolAvailable(false);
-        }
-      }
-
-      // Check Mem3D
-      try {
-        const mem3dHealth = await mem3dClient.checkHealth();
-        if (!cancelled) {
-          setMem3dAvailable(mem3dHealth.mem3d_available);
-        }
-      } catch (error) {
-        if (!cancelled) {
-          setMem3dAvailable(false);
+          setMonaiAvailable(false);
         }
       }
     };
@@ -206,19 +206,21 @@ export function ContourEditToolbar({
     };
   }, [isPredictionEnabled]);
 
-  // Notify parent when prediction mode changes
+  // Notify parent when prediction mode or params change
   useEffect(() => {
     if (onToolChange && activeTool === 'brush' && isPredictionEnabled) {
+      console.log('🎛️ Toolbar: Sending updated params to viewer:', mem3dParams);
       onToolChange({
         tool: 'brush',
         brushSize: brushThickness[0],
         isActive: true,
         smartBrushEnabled: smartBrush,
         predictionEnabled: isPredictionEnabled,
-        predictionMode: predictionMode
+        predictionMode: predictionMode,
+        mem3dParams: mem3dParams
       });
     }
-  }, [predictionMode, onToolChange, activeTool, isPredictionEnabled, brushThickness, smartBrush]);
+  }, [predictionMode, mem3dParams, onToolChange, activeTool, isPredictionEnabled, brushThickness, smartBrush]);
 
   const [showInfoDialog, setShowInfoDialog] = useState(false);
   const [showSmartNthDialog, setShowSmartNthDialog] = useState(false);
@@ -306,6 +308,19 @@ export function ContourEditToolbar({
     
     log.debug(`TOOLBAR: Setting tool to: ${newTool} active=${newTool !== null}`, 'toolbar');
     
+    // Pass tool state to parent - include AI tumor settings if activating that tool
+    if (toolId === 'interactive-tumor' && newTool !== null) {
+      if (onToolChange) {
+        onToolChange({
+          tool: 'interactive-tumor',
+          brushSize: 0,
+          isActive: true,
+          aiTumorSmoothOutput: aiTumorSmoothOutput
+        });
+      }
+      return;
+    }
+    
     // Pass tool state to parent
     if (onToolChange) {
       const toolState = {
@@ -313,7 +328,8 @@ export function ContourEditToolbar({
         brushSize: brushThickness[0],
         isActive: newTool !== null,
         predictionEnabled: isPredictionEnabled,
-        predictionMode: predictionMode
+        predictionMode: predictionMode,
+        mem3dParams: mem3dParams
       };
       log.debug('TOOLBAR: Sending tool state to parent', 'toolbar');
       onToolChange(toolState);
@@ -748,7 +764,8 @@ export function ContourEditToolbar({
                       brushSize: value[0],
                       isActive: true,
                       predictionEnabled: isPredictionEnabled,
-                      predictionMode: predictionMode
+                      predictionMode: predictionMode,
+                      mem3dParams: mem3dParams
                     });
                   }
                 }}
@@ -775,7 +792,8 @@ export function ContourEditToolbar({
                     isActive: true,
                     smartBrushEnabled: enabled,
                     predictionEnabled: isPredictionEnabled,
-                    predictionMode: predictionMode
+                    predictionMode: predictionMode,
+                    mem3dParams: mem3dParams
                   });
                 }
               }}
@@ -798,7 +816,8 @@ export function ContourEditToolbar({
                     isActive: true,
                     smartBrushEnabled: smartBrush,
                     predictionEnabled: enabled,
-                    predictionMode: predictionMode
+                    predictionMode: predictionMode,
+                    mem3dParams: mem3dParams
                   });
                 }
               }}
@@ -830,23 +849,6 @@ export function ContourEditToolbar({
                     </div>
                   </SelectItem>
                   <SelectItem
-                    value="mem3d"
-                    disabled={mem3dAvailable === false}
-                    className="text-[11px]"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <Brain className="w-3 h-3 text-cyan-400" />
-                      <span>Mem3D</span>
-                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-cyan-400/40 text-cyan-300">~200ms</Badge>
-                      {mem3dAvailable === false && (
-                        <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">Offline</Badge>
-                      )}
-                      {mem3dAvailable === null && (
-                        <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-yellow-400/40 text-yellow-300">...</Badge>
-                      )}
-                    </div>
-                  </SelectItem>
-                  <SelectItem
                     value="segvol"
                     disabled={segvolAvailable === false}
                     className="text-[11px]"
@@ -863,11 +865,28 @@ export function ContourEditToolbar({
                       )}
                     </div>
                   </SelectItem>
-                  <SelectItem value="smart" className="text-[11px]">
+                  <SelectItem
+                    value="monai"
+                    disabled={monaiAvailable === false}
+                    className="text-[11px]"
+                  >
                     <div className="flex items-center gap-1.5">
-                      <Grid3x3 className="w-3 h-3 text-orange-400" />
-                      <span>Smart</span>
-                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-orange-400/40 text-orange-300">Auto</Badge>
+                      <Workflow className="w-3 h-3 text-orange-400" />
+                      <span>MONAI</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-orange-400/40 text-orange-300">~0.8s</Badge>
+                      {monaiAvailable === false && (
+                        <Badge variant="destructive" className="text-[8px] px-1 py-0 h-3.5">Offline</Badge>
+                      )}
+                      {monaiAvailable === null && (
+                        <Badge variant="outline" className="text-[8px] px-1 py-0 h-3.5 border-yellow-400/40 text-yellow-300">...</Badge>
+                      )}
+                    </div>
+                  </SelectItem>
+                  <SelectItem value="mem3d" className="text-[11px]">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="w-3 h-3 text-cyan-400" />
+                      <span>MEM3D</span>
+                      <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-cyan-400/40 text-cyan-300">~50ms</Badge>
                     </div>
                   </SelectItem>
                 </SelectContent>
@@ -948,12 +967,71 @@ export function ContourEditToolbar({
 
     if (activeTool === 'interactive-tumor') {
       return (
-        <div className="flex items-center gap-2 ml-3 pl-3 border-l border-white/20">
-          <Sparkles className="w-3 h-3 text-purple-400" />
-          <span className="text-[11px] text-gray-300">Draw scribbles on 3-5 key slices</span>
-          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-purple-400/40 text-purple-300">
-            AI 3D
-          </Badge>
+        <div className="flex items-center gap-3 ml-3 pl-3 border-l border-white/20">
+          {/* Instruction */}
+          <div className="flex items-center gap-1.5">
+            <MousePointer2 className="w-3.5 h-3.5" style={{ color: structureColorRgb }} />
+            <span className="text-[11px] text-gray-300">Click tumor center</span>
+          </div>
+
+          {/* Smooth toggle - no box */}
+          <div className="flex items-center gap-1.5">
+            <Switch
+              id="ai-smooth-output"
+              checked={aiTumorSmoothOutput}
+              onCheckedChange={(checked) => {
+                setAiTumorSmoothOutput(checked);
+                if (onToolChange && activeTool === 'interactive-tumor') {
+                  onToolChange({
+                    tool: 'interactive-tumor',
+                    brushSize: 0,
+                    isActive: true,
+                    aiTumorSmoothOutput: checked
+                  });
+                }
+              }}
+              className="data-[state=checked]:bg-emerald-500 scale-90"
+            />
+            <Label 
+              htmlFor="ai-smooth-output" 
+              className="text-[10px] text-gray-400 cursor-pointer select-none whitespace-nowrap"
+            >
+              Smooth
+            </Label>
+          </div>
+
+          {/* Generate button - cleaner */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              if (canvasRef?.current) {
+                const event = new Event('ai-tumor-segment');
+                canvasRef.current.dispatchEvent(event);
+              }
+            }}
+            className="h-7 px-3 bg-emerald-600/80 hover:bg-emerald-500/80 border border-emerald-500/50 text-white rounded-md transition-colors"
+            title="Generate 3D segmentation"
+          >
+            <Sparkles className="w-3 h-3 mr-1.5" />
+            <span className="text-xs font-medium">Generate</span>
+          </Button>
+
+          {/* Clear button */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              if (canvasRef?.current) {
+                const event = new Event('ai-tumor-clear');
+                canvasRef.current.dispatchEvent(event);
+              }
+            }}
+            className="h-7 w-7 p-0 text-gray-400 hover:text-white hover:bg-white/10 rounded-md"
+            title="Clear click point"
+          >
+            <X className="w-3.5 h-3.5" />
+          </Button>
         </div>
       );
     }
@@ -1437,6 +1515,15 @@ export function ContourEditToolbar({
         structureName={selectedStructure?.structureName || ''}
         totalSlices={totalSlicesForSmartNth}
       />
+
+      {/* Prediction Tuning Panel */}
+      {predictionMode === 'mem3d' && isPredictionEnabled && (
+        <PredictionTuningPanel
+          params={mem3dParams}
+          onParamsChange={setMem3dParams}
+          onReset={() => setMem3dParams(DEFAULT_PARAMS)}
+        />
+      )}
     </div>
   );
 }
